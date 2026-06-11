@@ -94,10 +94,11 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 st.markdown("---")
 
 if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not data_ready):
-    with st.spinner("🧠 啟動預排讀取與全自動邏輯運算中..."):
+    with st.spinner("🧠 啟動多重訓練輪替與全自動邏輯運算中..."):
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
+            train_brcs_tracker = {name: None for name in all_staff} # 🌟 新增：B1/R/C2/S 訓練專用記憶體
             history_tracker = {name: [] for name in all_staff}
             monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
@@ -149,7 +150,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     unassigned_staff = shift_staff['姓名'].tolist()
                     assignments = {}
                     
-                    # 1. 不動檔優先 (強化防呆：過濾大小寫 X 與空白)
+                    # 1. 不動檔優先
                     for _, row in shift_staff.iterrows():
                         name, preset = row['姓名'], str(row['預設區域']).strip()
                         if preset.upper() not in ['X', 'NAN', 'NONE', '']:
@@ -168,12 +169,25 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             unassigned_staff.remove(name)
                             available_zones.remove("T")
                         elif name in train_b1_r:
-                            for target_zone in ["B1", "R", "C2", "S"]:
-                                if target_zone in available_zones:
-                                    assignments[name] = target_zone
+                            # 🌟 B1/R/C2/S 智慧連續與輪替機制
+                            prev_train_zone = train_brcs_tracker.get(name)
+                            if prev_train_zone and prev_train_zone in available_zones:
+                                # 維持連續狀態
+                                assignments[name] = prev_train_zone
+                                unassigned_staff.remove(name)
+                                available_zones.remove(prev_train_zone)
+                            else:
+                                # 遇到 OFF 切點後，重新分發：篩選出還有空位的目標區域
+                                valid_train_zones = [z for z in ["B1", "R", "S", "C2"] if z in available_zones]
+                                if valid_train_zones:
+                                    # 依照「當月次數最少」優先排序；若次數相同，優先配給 B1 > R > S > C2
+                                    valid_train_zones.sort(key=lambda z: (monthly_counts[name].get(z, 0), ["B1", "R", "S", "C2"].index(z)))
+                                    chosen_train = valid_train_zones[0]
+                                    
+                                    assignments[name] = chosen_train
                                     unassigned_staff.remove(name)
-                                    available_zones.remove(target_zone)
-                                    break
+                                    available_zones.remove(chosen_train)
+                                    train_brcs_tracker[name] = chosen_train # 寫入記憶體，明天繼續上這區
                             
                     # 3. T/P 連續狀態處理
                     for name in list(unassigned_staff):
@@ -270,22 +284,23 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         unassigned_staff.remove(name)
                         available_zones.remove(chosen_zone)
 
-                    # 寫回結果、歷史記憶、更新 TP 連續追蹤器與增加計數器
+                    # 寫回結果、歷史記憶與更新追蹤器
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
                         group = zone_groups.get(assigned_zone, assigned_zone)
                         history_tracker[name].append(group)
                         monthly_counts[name][assigned_zone] = monthly_counts[name].get(assigned_zone, 0) + 1
                         
-                        # 🌟 強化 TP 追蹤：就算是手動預排的 T 班，也會啟動連續機制！
                         if assigned_zone in ["T", "P"]:
                             tp_tracker[name] = assigned_zone
                         else:
-                            tp_tracker[name] = None # 如果今天上了別的區，代表沒連續了，將狀態清除
+                            tp_tracker[name] = None
 
+                # 🌟 OFF 觸發記憶體重置：休假後就能換下一個訓練區域！
                 todays_off_staff = df_shift[df_shift[date_col].astype(str).str.upper() == 'OFF']['姓名'].tolist()
                 for off_name in todays_off_staff:
                     tp_tracker[off_name] = None
+                    train_brcs_tracker[off_name] = None
                     
                 progress_bar.progress((day_idx + 1) / len(date_columns))
             
@@ -326,7 +341,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             df_result = pd.concat([df_result, df_summary], ignore_index=True)
             df_result = df_result.fillna("")
             
-            st.success("🎉 排班運算完成！完全尊重預排設定，並已納入結算統計。")
+            st.success("🎉 排班運算完成！B1/R/C2/S 訓練名單已可完美連續輪替與多人分配。")
             st.dataframe(df_result.head(10))
             
             output = io.BytesIO()
@@ -337,7 +352,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_預排強化版.xlsx", 
+                file_name="排班結果_多重訓練輪替版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
