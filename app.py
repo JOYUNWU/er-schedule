@@ -28,15 +28,13 @@ if training_file and template_file:
         df_shift = pd.read_csv(training_file) if 'csv' in training_file.name.lower() else pd.read_excel(training_file)
         df_template = pd.read_csv(template_file) if 'csv' in template_file.name.lower() else pd.read_excel(template_file)
             
-        # 🧹 【完美表頭更新】強制將 df_shift 的欄位重新命名，自動生成 1~31 天
         shift_cols = list(df_shift.columns)
-        shift_cols[0] = '編號'  # 消除最左上角的 Unnamed: 0
+        shift_cols[0] = '編號'
         shift_cols[1], shift_cols[2], shift_cols[3] = '組別', '性別', '姓名'
         date_length = len(shift_cols) - 4
-        shift_cols[4:] = [str(i) for i in range(1, date_length + 1)] # 自動產生 1, 2, 3...
+        shift_cols[4:] = [str(i) for i in range(1, date_length + 1)]
         df_shift.columns = shift_cols
         
-        # 強制將 df_template 的欄位也同步命名
         template_cols = list(df_template.columns)
         template_cols[0] = '編號'
         template_cols[1], template_cols[2], template_cols[3] = '組別', '性別', '姓名'
@@ -96,7 +94,7 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 st.markdown("---")
 
 if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not data_ready):
-    with st.spinner("🧠 啟動未來預測機制與絕對連續邏輯運算中..."):
+    with st.spinner("🧠 啟動預排讀取與全自動邏輯運算中..."):
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
@@ -151,10 +149,10 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     unassigned_staff = shift_staff['姓名'].tolist()
                     assignments = {}
                     
-                    # 1. 不動檔優先
+                    # 1. 不動檔優先 (強化防呆：過濾大小寫 X 與空白)
                     for _, row in shift_staff.iterrows():
                         name, preset = row['姓名'], str(row['預設區域']).strip()
-                        if preset not in ['x', 'nan', 'None']:
+                        if preset.upper() not in ['X', 'NAN', 'NONE', '']:
                             assignments[name] = preset
                             unassigned_staff.remove(name)
                             if preset in available_zones: available_zones.remove(preset)
@@ -271,13 +269,19 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         assignments[name] = chosen_zone
                         unassigned_staff.remove(name)
                         available_zones.remove(chosen_zone)
-                        if chosen_zone in ["T", "P"]: tp_tracker[name] = chosen_zone
 
+                    # 寫回結果、歷史記憶、更新 TP 連續追蹤器與增加計數器
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
                         group = zone_groups.get(assigned_zone, assigned_zone)
                         history_tracker[name].append(group)
                         monthly_counts[name][assigned_zone] = monthly_counts[name].get(assigned_zone, 0) + 1
+                        
+                        # 🌟 強化 TP 追蹤：就算是手動預排的 T 班，也會啟動連續機制！
+                        if assigned_zone in ["T", "P"]:
+                            tp_tracker[name] = assigned_zone
+                        else:
+                            tp_tracker[name] = None # 如果今天上了別的區，代表沒連續了，將狀態清除
 
                 todays_off_staff = df_shift[df_shift[date_col].astype(str).str.upper() == 'OFF']['姓名'].tolist()
                 for off_name in todays_off_staff:
@@ -285,7 +289,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     
                 progress_bar.progress((day_idx + 1) / len(date_columns))
             
-            # 插入當月班別 (插在最前面)
+            # 插入當月班別
             majority_shift_dict = {}
             for name in all_staff:
                 row_data = df_shift[df_shift['姓名'] == name][date_columns].values.flatten()
@@ -301,7 +305,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             for count_zone in zone_count_order:
                 df_result[count_zone] = df_result[date_columns].apply(lambda row: (row == count_zone).sum(), axis=1)
 
-            # 在表格最下方加入每日班別獨立人數統計
+            # 每日獨立人數統計
             summary_total = {'姓名': '各班獨立人數'}
             summary_d = {'姓名': 'D'}
             summary_e = {'姓名': 'E'}
@@ -320,11 +324,9 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
 
             df_summary = pd.DataFrame([summary_total, summary_d, summary_e, summary_n])
             df_result = pd.concat([df_result, df_summary], ignore_index=True)
-            
-            # 清理表格中的 NaN（空白值），讓 Excel 顯示得更乾淨
             df_result = df_result.fillna("")
             
-            st.success("🎉 排班運算完成！表頭的 Unnamed 已全部淨化為日期數字。")
+            st.success("🎉 排班運算完成！完全尊重預排設定，並已納入結算統計。")
             st.dataframe(df_result.head(10))
             
             output = io.BytesIO()
@@ -335,7 +337,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_乾淨表頭版.xlsx", 
+                file_name="排班結果_預排強化版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
