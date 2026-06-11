@@ -26,6 +26,7 @@ if training_file and roster_file and aide_file:
 
         # 2. 清理原始班表 (抓取每日 D/E/N)
         shift_cols = list(df_train.columns)
+        shift_cols[0] = '編號'
         shift_cols[1], shift_cols[2], shift_cols[3] = '組別', '性別', '姓名'
         date_length = len(shift_cols) - 4
         shift_cols[4:] = [str(i) for i in range(1, date_length + 1)]
@@ -35,7 +36,7 @@ if training_file and roster_file and aide_file:
         
         date_cols = [str(i) for i in range(1, date_length + 1)]
 
-        # 建立快查表
+        # 建立快查表，告訴系統每個人每天是什麼班別
         train_shift_map = {}
         for _, row in df_train.iterrows():
             name = str(row['姓名']).strip()
@@ -80,7 +81,7 @@ if training_file and roster_file and aide_file:
                 final_roster_data = []
 
                 for day in date_cols:
-                    final_roster_data.append({k: (f"=== 6/{day} ===" if k == 'Name_1' else "") for k in output_cols})
+                    final_roster_data.append({k: (f"=== 本月 {day} 日 ===" if k == 'Name_1' else "") for k in output_cols})
                     final_roster_data.append({k: "" for k in output_cols})
 
                     shifts_info = [('D', "7'-4"), ('E', "3'-12"), ('N', "11'-8")]
@@ -145,7 +146,7 @@ if training_file and roster_file and aide_file:
                 df_final = pd.DataFrame(final_roster_data, columns=output_cols)
 
                 st.success("✅ 每日班表產出成功！已自動將護佐接續於名單後方。")
-                st.dataframe(df_final.head(25)) 
+                st.dataframe(df_final.head(30)) 
 
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -160,4 +161,4 @@ if training_file and roster_file and aide_file:
                 )
 
     except Exception as e:
-        st.error(f"處理失敗，請檢查檔案格式是否正確：{e}")
+        st.error(f"處理發生內部錯誤：{e}")
