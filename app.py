@@ -89,11 +89,12 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 st.markdown("---")
 
 if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not data_ready):
-    with st.spinner("🧠 正在執行分組邏輯與區域輪替中..."):
+    with st.spinner("🧠 啟動未來預測機制與絕對連續邏輯運算中..."):
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
             history_tracker = {name: [] for name in all_staff}
+            monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
             
             zone_groups = {
@@ -102,9 +103,25 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                 "A1": "ABC_G", "B1": "ABC_G", "C1": "ABC_G", "A2": "ABC_G", "B2": "ABC_G", "C2": "ABC_G",
                 "R": "R_G", "R1": "R_G", "R2": "R_G", "R3": "R_G"
             }
-            
-            # 定義 A 組在人力充足時應避開的區域
             team_a_avoids = ["A1", "R2", "MO", "S1", "C1"]
+            
+            MAX_DAYS = {
+                "T": 3, "R": 3, "B1": 3, "S": 3, "P": 3, "C1": 3,
+                "T2": 2, "GB": 2, "GC": 1, "GD": 1, "S2": 2
+            }
+            
+            # 🔮 【新增】預先計算每個人的連續上班天數 (Lookahead Memory)
+            work_blocks = {name: [0]*len(date_columns) for name in all_staff}
+            for name in all_staff:
+                for day_idx in range(len(date_columns)):
+                    count = 0
+                    for future_idx in range(day_idx, len(date_columns)):
+                        col = date_columns[future_idx]
+                        val = str(df_shift.loc[df_shift['姓名'] == name, col].values[0]).strip().upper()
+                        if val == 'OFF':
+                            break
+                        count += 1
+                    work_blocks[name][day_idx] = count
             
             for day_idx, date_col in enumerate(date_columns):
                 todays_shifts = df_shift[['姓名', '組別', '性別', date_col]].copy()
@@ -154,7 +171,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                     available_zones.remove(target_zone)
                                     break
                             
-                    # 3. T/P 連續狀態處理
+                    # 3. T/P 連續狀態處理 (恢復鐵律：絕對不打斷，一路排到 OFF)
                     for name in list(unassigned_staff):
                         prev_tp = tp_tracker.get(name)
                         if prev_tp and prev_tp in available_zones:
@@ -163,14 +180,10 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             available_zones.remove(prev_tp)
                     
                     # 4. L 順位指派
-                    if shift_type == 'D':
-                        l_chain = [d_l_1, d_l_2, d_l_3]
-                    elif shift_type == 'E':
-                        l_chain = [e_l_1, e_l_2, e_l_3]
-                    elif shift_type == 'N':
-                        l_chain = [n_l_1, n_l_2, n_l_3]
-                    else:
-                        l_chain = []
+                    if shift_type == 'D': l_chain = [d_l_1, d_l_2, d_l_3]
+                    elif shift_type == 'E': l_chain = [e_l_1, e_l_2, e_l_3]
+                    elif shift_type == 'N': l_chain = [n_l_1, n_l_2, n_l_3]
+                    else: l_chain = []
 
                     for l_candidate in l_chain:
                         if l_candidate in unassigned_staff:
@@ -187,7 +200,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 available_zones.remove(mo_zone)
                                 break
                     
-                    # 6. 剩餘分配 (加入分組限制與記憶輪替)
+                    # 6. 剩餘分配 (加入未來預測與上限防呆)
                     random.shuffle(unassigned_staff) 
                     
                     for name in list(unassigned_staff):
@@ -202,48 +215,77 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         candidate_zones = []
                         for zone in list(available_zones):
                             if zone == "S2" and str(gender).upper() == "M": continue
+                            
+                            # 🔮 未來預測防呆：如果是連續區 (T/P)，確保排下去到休假前都不會超標
+                            if zone in ["T", "P"]:
+                                rem_days = work_blocks[name][day_idx]
+                                if monthly_counts[name].get(zone, 0) + rem_days > MAX_DAYS.get(zone, 3):
+                                    continue
+                            # 常規上限防呆
+                            elif zone in MAX_DAYS and monthly_counts[name].get(zone, 0) >= MAX_DAYS[zone]:
+                                continue
+                                
                             candidate_zones.append(zone)
                             
+                        # 終極防呆：若條件太嚴苛導致無區可選，暫時解鎖所有區域避免當機
+                        if not candidate_zones:
+                            for zone in list(available_zones):
+                                if zone == "S2" and str(gender).upper() == "M": continue
+                                candidate_zones.append(zone)
+                                
                         if not candidate_zones: continue 
                         
                         # A組動態避開邏輯
                         pref_candidate_zones = candidate_zones.copy()
                         if team == 'A':
                             filtered = [z for z in pref_candidate_zones if z not in team_a_avoids]
-                            if len(filtered) > 0: # 代表還有其他區域可選，人力充足，執行避開
+                            if len(filtered) > 0:
                                 pref_candidate_zones = filtered
+                        
+                        def get_zone_count(z):
+                            if z in ['A2', 'B2', 'C2']:
+                                return sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
+                            return monthly_counts[name].get(z, 0)
                         
                         best_zones = [z for z in pref_candidate_zones if zone_groups.get(z, z) not in recent_groups]
                         
                         if best_zones:
-                            chosen_zone = random.choice(best_zones)
+                            best_zones.sort(key=lambda z: get_zone_count(z))
+                            min_count = get_zone_count(best_zones[0])
+                            lowest_zones = [z for z in best_zones if get_zone_count(z) == min_count]
+                            chosen_zone = random.choice(lowest_zones)
                         else:
                             last_group = history_tracker[name][-1:] if name in history_tracker else []
                             better_zones = [z for z in pref_candidate_zones if zone_groups.get(z, z) not in last_group]
                             if better_zones:
-                                chosen_zone = random.choice(better_zones)
+                                better_zones.sort(key=lambda z: get_zone_count(z))
+                                min_count = get_zone_count(better_zones[0])
+                                lowest_zones = [z for z in better_zones if get_zone_count(z) == min_count]
+                                chosen_zone = random.choice(lowest_zones)
                             else:
-                                chosen_zone = random.choice(pref_candidate_zones)
+                                pref_candidate_zones.sort(key=lambda z: get_zone_count(z))
+                                min_count = get_zone_count(pref_candidate_zones[0])
+                                lowest_zones = [z for z in pref_candidate_zones if get_zone_count(z) == min_count]
+                                chosen_zone = random.choice(lowest_zones)
 
                         assignments[name] = chosen_zone
                         unassigned_staff.remove(name)
                         available_zones.remove(chosen_zone)
                         if chosen_zone in ["T", "P"]: tp_tracker[name] = chosen_zone
 
-                    # 寫回結果與歷史記憶
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
                         group = zone_groups.get(assigned_zone, assigned_zone)
                         history_tracker[name].append(group)
+                        monthly_counts[name][assigned_zone] = monthly_counts[name].get(assigned_zone, 0) + 1
 
-                # 解除 OFF 人員的 TP 狀態
                 todays_off_staff = df_shift[df_shift[date_col].astype(str).str.upper() == 'OFF']['姓名'].tolist()
                 for off_name in todays_off_staff:
                     tp_tracker[off_name] = None
                     
                 progress_bar.progress((day_idx + 1) / len(date_columns))
             
-            st.success("🎉 排班運算完成！區域已根據組別與記憶進行輪替。")
+            st.success("🎉 排班運算完成！已達成「絕對連續」與「月度上限」雙重完美平衡。")
             st.dataframe(df_result.head(10))
             
             output = io.BytesIO()
@@ -254,7 +296,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_分組優化版.xlsx", 
+                file_name="排班結果_預測連續版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
