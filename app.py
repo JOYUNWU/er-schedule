@@ -278,25 +278,38 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     
                 progress_bar.progress((day_idx + 1) / len(date_columns))
             
-            # 🌟 新增：計算每人當月最多的班別 (D, E, N) 並插入新欄位
+            # 插入當月班別
             majority_shift_dict = {}
             for name in all_staff:
-                # 抓出這個人整個月的班表資料
                 row_data = df_shift[df_shift['姓名'] == name][date_columns].values.flatten()
-                # 過濾出只有 D, E, N 的格子
                 valid_shifts = [str(x).strip().upper() for x in row_data if str(x).strip().upper() in ['D', 'E', 'N']]
-                if valid_shifts:
-                    # 找出出現最多次的班別
-                    major_shift = max(set(valid_shifts), key=valid_shifts.count)
-                else:
-                    major_shift = ""
+                major_shift = max(set(valid_shifts), key=valid_shifts.count) if valid_shifts else ""
                 majority_shift_dict[name] = major_shift
                 
-            # 找到「姓名」欄位的位置，並在它的前面插入「當月班別」
             name_col_index = df_result.columns.get_loc('姓名')
             df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
             
-            st.success("🎉 排班運算完成！已新增「當月班別」代表欄位。")
+            # 🌟 新增：在表格最下方加入每日班別獨立人數統計
+            summary_total = {'姓名': '各班獨立人數'}
+            summary_d = {'姓名': 'D'}
+            summary_e = {'姓名': 'E'}
+            summary_n = {'姓名': 'N'}
+            
+            for date_col in date_columns:
+                daily_shifts = df_shift[date_col].astype(str).str.upper()
+                d_count = (daily_shifts == 'D').sum()
+                e_count = (daily_shifts == 'E').sum()
+                n_count = (daily_shifts == 'N').sum()
+                
+                summary_d[date_col] = d_count
+                summary_e[date_col] = e_count
+                summary_n[date_col] = n_count
+                summary_total[date_col] = d_count + e_count + n_count
+
+            df_summary = pd.DataFrame([summary_total, summary_d, summary_e, summary_n])
+            df_result = pd.concat([df_result, df_summary], ignore_index=True)
+            
+            st.success("🎉 排班運算完成！已新增「當月班別」與「每日獨立人數統計」。")
             st.dataframe(df_result.head(10))
             
             output = io.BytesIO()
@@ -307,7 +320,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_預測連續版_含當月班別.xlsx", 
+                file_name="排班結果_預測連續_含統計版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
