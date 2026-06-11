@@ -110,7 +110,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                 "T2": 2, "GB": 2, "GC": 1, "GD": 1, "S2": 2
             }
             
-            # 🔮 【新增】預先計算每個人的連續上班天數 (Lookahead Memory)
             work_blocks = {name: [0]*len(date_columns) for name in all_staff}
             for name in all_staff:
                 for day_idx in range(len(date_columns)):
@@ -171,7 +170,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                     available_zones.remove(target_zone)
                                     break
                             
-                    # 3. T/P 連續狀態處理 (恢復鐵律：絕對不打斷，一路排到 OFF)
+                    # 3. T/P 連續狀態處理
                     for name in list(unassigned_staff):
                         prev_tp = tp_tracker.get(name)
                         if prev_tp and prev_tp in available_zones:
@@ -200,7 +199,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 available_zones.remove(mo_zone)
                                 break
                     
-                    # 6. 剩餘分配 (加入未來預測與上限防呆)
+                    # 6. 剩餘分配
                     random.shuffle(unassigned_staff) 
                     
                     for name in list(unassigned_staff):
@@ -215,19 +214,14 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         candidate_zones = []
                         for zone in list(available_zones):
                             if zone == "S2" and str(gender).upper() == "M": continue
-                            
-                            # 🔮 未來預測防呆：如果是連續區 (T/P)，確保排下去到休假前都不會超標
                             if zone in ["T", "P"]:
                                 rem_days = work_blocks[name][day_idx]
                                 if monthly_counts[name].get(zone, 0) + rem_days > MAX_DAYS.get(zone, 3):
                                     continue
-                            # 常規上限防呆
                             elif zone in MAX_DAYS and monthly_counts[name].get(zone, 0) >= MAX_DAYS[zone]:
                                 continue
-                                
                             candidate_zones.append(zone)
                             
-                        # 終極防呆：若條件太嚴苛導致無區可選，暫時解鎖所有區域避免當機
                         if not candidate_zones:
                             for zone in list(available_zones):
                                 if zone == "S2" and str(gender).upper() == "M": continue
@@ -235,7 +229,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 
                         if not candidate_zones: continue 
                         
-                        # A組動態避開邏輯
                         pref_candidate_zones = candidate_zones.copy()
                         if team == 'A':
                             filtered = [z for z in pref_candidate_zones if z not in team_a_avoids]
@@ -285,7 +278,25 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     
                 progress_bar.progress((day_idx + 1) / len(date_columns))
             
-            st.success("🎉 排班運算完成！已達成「絕對連續」與「月度上限」雙重完美平衡。")
+            # 🌟 新增：計算每人當月最多的班別 (D, E, N) 並插入新欄位
+            majority_shift_dict = {}
+            for name in all_staff:
+                # 抓出這個人整個月的班表資料
+                row_data = df_shift[df_shift['姓名'] == name][date_columns].values.flatten()
+                # 過濾出只有 D, E, N 的格子
+                valid_shifts = [str(x).strip().upper() for x in row_data if str(x).strip().upper() in ['D', 'E', 'N']]
+                if valid_shifts:
+                    # 找出出現最多次的班別
+                    major_shift = max(set(valid_shifts), key=valid_shifts.count)
+                else:
+                    major_shift = ""
+                majority_shift_dict[name] = major_shift
+                
+            # 找到「姓名」欄位的位置，並在它的前面插入「當月班別」
+            name_col_index = df_result.columns.get_loc('姓名')
+            df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
+            
+            st.success("🎉 排班運算完成！已新增「當月班別」代表欄位。")
             st.dataframe(df_result.head(10))
             
             output = io.BytesIO()
@@ -296,7 +307,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_預測連續版.xlsx", 
+                file_name="排班結果_預測連續版_含當月班別.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
