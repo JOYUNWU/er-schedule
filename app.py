@@ -27,7 +27,7 @@ if training_file and template_file:
         df_shift = pd.read_csv(training_file) if 'csv' in training_file.name.lower() else pd.read_excel(training_file)
         df_template = pd.read_csv(template_file) if 'csv' in template_file.name.lower() else pd.read_excel(template_file)
             
-       # 強制將 df_shift 的第 2, 3, 4 欄 (Index 1, 2, 3) 重新命名
+        # 強制將 df_shift 的第 2, 3, 4 欄 (Index 1, 2, 3) 重新命名
         shift_cols = list(df_shift.columns)
         shift_cols[1], shift_cols[2], shift_cols[3] = '組別', '性別', '姓名'
         df_shift.columns = shift_cols
@@ -68,7 +68,6 @@ train_t = st.sidebar.multiselect("檢傷(T) 訓練名單", options=all_staff)
 st.sidebar.markdown("---")
 st.sidebar.subheader("👑 各班組長 (L) 順位設定")
 
-# 建立安全無重複的下拉選單選項
 def safe_options(default_val):
     return list(dict.fromkeys([default_val] + all_staff))
 
@@ -118,4 +117,97 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     if staff_count >= 21: base_zones.append("GC")
                     if staff_count >= 22: base_zones.append("GD")
                     
-                    available_zones = base_zones
+                    available_zones = base_zones.copy()
+                    unassigned_staff = shift_staff['姓名'].tolist()
+                    assignments = {}
+                    
+                    # 1. 不動檔優先
+                    for _, row in shift_staff.iterrows():
+                        name, preset = row['姓名'], str(row['預設區域']).strip()
+                        if preset not in ['x', 'nan', 'None']:
+                            assignments[name] = preset
+                            unassigned_staff.remove(name)
+                            if preset in available_zones: available_zones.remove(preset)
+                    
+                    # 2. 訓練名單優先綁定
+                    for name in list(unassigned_staff):
+                        if name in train_s2 and "S2" in available_zones:
+                            assignments[name] = "S2"
+                            unassigned_staff.remove(name)
+                            available_zones.remove("S2")
+                        elif name in train_t and "T" in available_zones:
+                            assignments[name] = "T"
+                            unassigned_staff.remove(name)
+                            available_zones.remove("T")
+                        elif name in train_b1_r:
+                            for target_zone in ["B1", "R", "C2", "S"]:
+                                if target_zone in available_zones:
+                                    assignments[name] = target_zone
+                                    unassigned_staff.remove(name)
+                                    available_zones.remove(target_zone)
+                                    break
+                            
+                    # 3. T/P 連續狀態處理
+                    for name in list(unassigned_staff):
+                        prev_tp = tp_tracker.get(name)
+                        if prev_tp and prev_tp in available_zones:
+                            assignments[name] = prev_tp
+                            unassigned_staff.remove(name)
+                            available_zones.remove(prev_tp)
+                    
+                    # 4. L 順位指派 (根據當前班別動態抓取)
+                    if shift_type == 'D':
+                        l_chain = [d_l_1, d_l_2, d_l_3]
+                    elif shift_type == 'E':
+                        l_chain = [e_l_1, e_l_2, e_l_3]
+                    elif shift_type == 'N':
+                        l_chain = [n_l_1, n_l_2, n_l_3]
+                    else:
+                        l_chain = []
+
+                    for l_candidate in l_chain:
+                        if l_candidate in unassigned_staff:
+                            assignments[l_candidate] = "L"
+                            unassigned_staff.remove(l_candidate)
+                            break
+                                
+                    # 5. 連啟倫鎖定
+                    if "N連啟倫" in unassigned_staff:
+                        for mo_zone in ["MO", "MO1"]:
+                            if mo_zone in available_zones:
+                                assignments["N連啟倫"] = mo_zone
+                                unassigned_staff.remove("N連啟倫")
+                                available_zones.remove(mo_zone)
+                                break
+                    
+                    # 6. 剩餘分配 (避開男性去 S2)
+                    for name in list(unassigned_staff):
+                        gender_series = shift_staff[shift_staff['姓名'] == name]['性別'].values
+                        gender = gender_series[0] if len(gender_series) > 0 else ""
+                        
+                        for zone in list(available_zones):
+                            if zone == "S2" and str(gender).upper() == "M": continue
+                            assignments[name] = zone
+                            unassigned_staff.remove(name)
+                            available_zones.remove(zone)
+                            if zone in ["T", "P"]: tp_tracker[name] = zone
+                            break
+
+                    # 寫回結果
+                    for name, assigned_zone in assignments.items():
+                        df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
+
+                # 解除 OFF 人員的 TP 狀態
+                todays_off_staff = df_shift[df_shift[date_col].astype(str).str.upper() == 'OFF']['姓名'].tolist()
+                for off_name in todays_off_staff:
+                    tp_tracker[off_name] = None
+                    
+                progress_bar.progress((day_idx + 1) / len(date_columns))
+            
+            st.success("🎉 排班運算完成！")
+            st.dataframe(df_result.head(10))
+            csv = df_result.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(label="📥 下載最終排班表 (CSV)", data=csv, file_name="排班結果_最新版.csv", mime="text/csv")
+            
+        except Exception as e:
+            st.error(f"執行時發生內部錯誤：{e}")
