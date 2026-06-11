@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import random  # 引入隨機洗牌套件
+import random
+import io  # 新增：用來將資料轉換成 Excel 檔案格式的套件
 
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
 st.title("🏥 急診護理人員自動排班系統 (全功能整合版)")
@@ -28,12 +29,12 @@ if training_file and template_file:
         df_shift = pd.read_csv(training_file) if 'csv' in training_file.name.lower() else pd.read_excel(training_file)
         df_template = pd.read_csv(template_file) if 'csv' in template_file.name.lower() else pd.read_excel(template_file)
             
-        # 強制將 df_shift 的第 2, 3, 4 欄 (Index 1, 2, 3) 重新命名
+        # 強制將 df_shift 的第 2, 3, 4 欄重新命名
         shift_cols = list(df_shift.columns)
         shift_cols[1], shift_cols[2], shift_cols[3] = '組別', '性別', '姓名'
         df_shift.columns = shift_cols
         
-        # 強制將 df_template 的第 2, 3, 4 欄 (Index 1, 2, 3) 重新命名
+        # 強制將 df_template 的第 2, 3, 4 欄重新命名
         template_cols = list(df_template.columns)
         template_cols[1], template_cols[2], template_cols[3] = '組別', '性別', '姓名'
         df_template.columns = template_cols
@@ -97,10 +98,10 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
-            history_tracker = {name: [] for name in all_staff} # 新增：歷史區域記憶體
+            history_tracker = {name: [] for name in all_staff}
             progress_bar = st.progress(0)
             
-            # 定義區域群組 (避免連續分配同一群組)
+            # 定義區域群組
             zone_groups = {
                 "MO": "MO_G", "MO1": "MO_G", "MO2": "MO_G",
                 "S": "S_G", "S1": "S_G", "S2": "S_G",
@@ -190,13 +191,12 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 break
                     
                     # 6. 剩餘分配 (加入歷史輪替與隨機洗牌機制)
-                    random.shuffle(unassigned_staff) # 每天隨機打亂未分配名單，確保公平
+                    random.shuffle(unassigned_staff) 
                     
                     for name in list(unassigned_staff):
                         gender_series = shift_staff[shift_staff['姓名'] == name]['性別'].values
                         gender = gender_series[0] if len(gender_series) > 0 else ""
                         
-                        # 取得這個人最近 2 次上班的區域群組
                         recent_groups = history_tracker[name][-2:] if name in history_tracker else []
                         
                         candidate_zones = []
@@ -204,15 +204,13 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             if zone == "S2" and str(gender).upper() == "M": continue
                             candidate_zones.append(zone)
                             
-                        if not candidate_zones: continue # 安全防呆
+                        if not candidate_zones: continue 
                         
-                        # 優先尋找「不在最近兩次群組內」的區域
                         best_zones = [z for z in candidate_zones if zone_groups.get(z, z) not in recent_groups]
                         
                         if best_zones:
                             chosen_zone = random.choice(best_zones)
                         else:
-                            # 退而求其次，至少確保跟「昨天」不一樣
                             last_group = history_tracker[name][-1:] if name in history_tracker else []
                             better_zones = [z for z in candidate_zones if zone_groups.get(z, z) not in last_group]
                             if better_zones:
@@ -228,9 +226,31 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     # 寫回結果與歷史記憶
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
-                        
-                        # 將今天的群組紀錄寫入該同仁的歷史記憶中
                         group = zone_groups.get(assigned_zone, assigned_zone)
                         history_tracker[name].append(group)
 
                 # 解除 OFF 人員的 TP 狀態
+                todays_off_staff = df_shift[df_shift[date_col].astype(str).str.upper() == 'OFF']['姓名'].tolist()
+                for off_name in todays_off_staff:
+                    tp_tracker[off_name] = None
+                    
+                progress_bar.progress((day_idx + 1) / len(date_columns))
+            
+            st.success("🎉 排班運算完成！區域已根據記憶進行輪替。")
+            st.dataframe(df_result.head(10))
+            
+            # 🌟 新增：將產出的結果轉為 Excel 檔案供下載
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_result.to_excel(writer, index=False, sheet_name='排班結果')
+            excel_data = output.getvalue()
+            
+            st.download_button(
+                label="📥 下載最終排班表 (Excel)", 
+                data=excel_data, 
+                file_name="排班結果_輪替版.xlsx", 
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+        except Exception as e:
+            st.error(f"執行時發生內部錯誤：{e}")
