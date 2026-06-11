@@ -94,7 +94,7 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 st.markdown("---")
 
 if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not data_ready):
-    with st.spinner("🧠 啟動各組白名單與「同班別跨組分散機制」..."):
+    with st.spinner("🧠 啟動不動檔絕對霸王條款與跨組別防撞機制..."):
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
@@ -142,7 +142,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                 todays_template.columns = ['姓名', '預設區域']
                 daily_data = pd.merge(todays_shifts, todays_template, on='姓名')
                 
-                # 小幫手函數：取得某人的組別
                 def get_team_of(staff_name):
                     ts = shift_staff[shift_staff['姓名'] == staff_name]['組別'].values
                     return str(ts[0]).strip().upper() if len(ts) > 0 else ""
@@ -155,19 +154,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     unassigned_staff = shift_staff['姓名'].tolist()
                     assignments = {}
                     
-                    # 1. L 順位指派
-                    if shift_type == 'D': l_chain = [d_l_1, d_l_2, d_l_3]
-                    elif shift_type == 'E': l_chain = [e_l_1, e_l_2, e_l_3]
-                    elif shift_type == 'N': l_chain = [n_l_1, n_l_2, n_l_3]
-                    else: l_chain = []
-
-                    for l_candidate in l_chain:
-                        if l_candidate in unassigned_staff:
-                            assignments[l_candidate] = "L"
-                            unassigned_staff.remove(l_candidate)
-                            break
-                    
-                    # 動態滿編邏輯
+                    # 1. 決定基礎區域 (基於當班總人數)
                     if staff_count <= 17:
                         base_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S"]
                     elif staff_count == 18:
@@ -184,22 +171,42 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         base_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GB", "GC", "GD"]
 
                     available_zones = base_zones.copy()
+                    target_zone_count = staff_count - 1 # 因為 L 必定佔據 1 個隱形名額
                     
-                    while len(available_zones) < len(unassigned_staff):
+                    while len(available_zones) < target_zone_count:
                         available_zones.append(f"支援{len(available_zones)+1}")
-                    if len(available_zones) > len(unassigned_staff):
-                        available_zones = available_zones[:len(unassigned_staff)]
+                    if len(available_zones) > target_zone_count:
+                        available_zones = available_zones[:target_zone_count]
                     
-                    # 2. 不動檔優先
+                    # 🌟 2. 不動檔霸王條款 (最優先執行！確保「職代」等文字絕對不會被組長邏輯蓋掉)
                     for _, row in shift_staff.iterrows():
                         name, preset = row['姓名'], str(row['預設區域']).strip()
                         if preset.upper() not in ['X', 'NAN', 'NONE', ''] and name in unassigned_staff:
                             assignments[name] = preset
                             unassigned_staff.remove(name)
-                            if preset in available_zones: available_zones.remove(preset)
-                            elif available_zones: available_zones.pop()
+                            # 如果手動設為 L，不扣除可用區域；其餘字眼(如職代、公假)需扣除一個區域以平衡名額
+                            if preset == "L":
+                                pass
+                            else:
+                                if preset in available_zones: 
+                                    available_zones.remove(preset)
+                                elif available_zones: 
+                                    available_zones.pop()
                     
-                    # 3. 訓練名單優先綁定
+                    # 🌟 3. L 順位指派 (只有在不動檔沒有「預排 L」時才啟動)
+                    if "L" not in assignments.values():
+                        if shift_type == 'D': l_chain = [d_l_1, d_l_2, d_l_3]
+                        elif shift_type == 'E': l_chain = [e_l_1, e_l_2, e_l_3]
+                        elif shift_type == 'N': l_chain = [n_l_1, n_l_2, n_l_3]
+                        else: l_chain = []
+
+                        for l_candidate in l_chain:
+                            if l_candidate in unassigned_staff:
+                                assignments[l_candidate] = "L"
+                                unassigned_staff.remove(l_candidate)
+                                break
+                    
+                    # 4. 訓練名單優先綁定
                     for name in list(unassigned_staff):
                         if name in train_s2:
                             assignments[name] = "S2"
@@ -228,7 +235,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 if chosen_train in available_zones: available_zones.remove(chosen_train)
                                 elif available_zones: available_zones.pop()
                             
-                    # 4. T/P 連續狀態處理
+                    # 5. T/P 連續狀態處理
                     for name in list(unassigned_staff):
                         prev_tp = tp_tracker.get(name)
                         if prev_tp in ["T", "P"]:
@@ -241,7 +248,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             else:
                                 tp_tracker[name] = None
                                 
-                    # 5. 連啟倫鎖定
+                    # 6. 連啟倫鎖定
                     if "N連啟倫" in unassigned_staff:
                         chosen = "MO" if monthly_counts["N連啟倫"].get("MO",0) <= monthly_counts["N連啟倫"].get("MO1",0) else "MO1"
                         assignments["N連啟倫"] = chosen
@@ -249,169 +256,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         if chosen in available_zones: available_zones.remove(chosen)
                         elif available_zones: available_zones.pop()
                     
-                    # 6. 剩餘隨機與均分分配
+                    # 7. 剩餘隨機與跨組均分分配
                     def get_team_priority(staff_name):
                         t_series = shift_staff[shift_staff['姓名'] == staff_name]['組別'].values
-                        t = str(t_series[0]).strip().upper() if len(t_series) > 0 else ""
-                        if t == 'D': return 1
-                        elif t == 'C': return 2
-                        elif t == 'B': return 3
-                        else: return 4
-
-                    random.shuffle(unassigned_staff)
-                    unassigned_staff.sort(key=get_team_priority)
-
-                    # 🌟 建立同班別群組探測雷達
-                    shift_cluster_teams = {}
-                    for assigned_n, assigned_z in assignments.items():
-                        t_val = get_team_of(assigned_n)
-                        c_val = zone_groups.get(assigned_z, assigned_z)
-                        if c_val not in shift_cluster_teams: shift_cluster_teams[c_val] = set()
-                        shift_cluster_teams[c_val].add(t_val)
-
-                    for name in list(unassigned_staff):
-                        gender_series = shift_staff[shift_staff['姓名'] == name]['性別'].values
-                        gender = gender_series[0] if len(gender_series) > 0 else ""
-                        team = get_team_of(name)
-                        recent_groups = history_tracker[name][-2:] if name in history_tracker else []
-
-                        team_allowed = team_allowed_zones.get(team, available_zones)
-
-                        candidate_zones = []
-                        for zone in list(available_zones):
-                            if zone not in team_allowed: continue
-                            if zone == "S2" and str(gender).upper() == "M": continue
-                            if zone in ["T", "P"]:
-                                rem_days = work_blocks[name][day_idx]
-                                if monthly_counts[name].get(zone, 0) + rem_days > MAX_DAYS.get(zone, 3): continue
-                            elif zone in MAX_DAYS and monthly_counts[name].get(zone, 0) >= MAX_DAYS[zone]: continue
-                            candidate_zones.append(zone)
-
-                        if not candidate_zones:
-                            for zone in list(available_zones):
-                                if zone not in team_allowed: continue
-                                if zone == "S2" and str(gender).upper() == "M": continue
-                                candidate_zones.append(zone)
-
-                        if not candidate_zones:
-                            for zone in list(available_zones):
-                                if zone == "S2" and str(gender).upper() == "M": continue
-                                candidate_zones.append(zone)
-
-                        if not candidate_zones: 
-                            candidate_zones = available_zones.copy() if available_zones else ["支援"]
-
-                        pref_candidate_zones = candidate_zones.copy()
-                        
-                        # 🌟 啟動同班別跨組分散機制：過濾掉已經有「同組人」進駐的區域群組
-                        diverse_zones = []
-                        for z in pref_candidate_zones:
-                            c_val = zone_groups.get(z, z)
-                            if team not in shift_cluster_teams.get(c_val, set()):
-                                diverse_zones.append(z)
-                        # 如果還有剩餘乾淨的選擇，就強制套用分散；若無，則允許通融 (避免死胡同)
-                        if diverse_zones:
-                            pref_candidate_zones = diverse_zones
-
-                        def get_zone_count(z):
-                            if z in ['A2', 'B2', 'C2']: return sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
-                            if z in ['GB', 'GC', 'GD']: return sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC', 'GD'])
-                            return monthly_counts[name].get(z, 0)
-
-                        best_zones = [z for z in pref_candidate_zones if zone_groups.get(z, z) not in recent_groups]
-
-                        if best_zones:
-                            best_zones.sort(key=lambda z: get_zone_count(z))
-                            min_count = get_zone_count(best_zones[0])
-                            lowest_zones = [z for z in best_zones if get_zone_count(z) == min_count]
-                            chosen_zone = random.choice(lowest_zones)
-                        else:
-                            last_group = history_tracker[name][-1:] if name in history_tracker else []
-                            better_zones = [z for z in pref_candidate_zones if zone_groups.get(z, z) not in last_group]
-                            if better_zones:
-                                better_zones.sort(key=lambda z: get_zone_count(z))
-                                min_count = get_zone_count(better_zones[0])
-                                lowest_zones = [z for z in better_zones if get_zone_count(z) == min_count]
-                                chosen_zone = random.choice(lowest_zones)
-                            else:
-                                pref_candidate_zones.sort(key=lambda z: get_zone_count(z))
-                                min_count = get_zone_count(pref_candidate_zones[0])
-                                lowest_zones = [z for z in pref_candidate_zones if get_zone_count(z) == min_count]
-                                chosen_zone = random.choice(lowest_zones)
-
-                        assignments[name] = chosen_zone
-                        unassigned_staff.remove(name)
-                        available_zones.remove(chosen_zone)
-                        
-                        # 🌟 將剛剛發配好的同仁紀錄更新到雷達中
-                        assigned_cluster = zone_groups.get(chosen_zone, chosen_zone)
-                        if assigned_cluster not in shift_cluster_teams: shift_cluster_teams[assigned_cluster] = set()
-                        shift_cluster_teams[assigned_cluster].add(team)
-
-                    for name, assigned_zone in assignments.items():
-                        df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
-                        group = zone_groups.get(assigned_zone, assigned_zone)
-                        history_tracker[name].append(group)
-                        monthly_counts[name][assigned_zone] = monthly_counts[name].get(assigned_zone, 0) + 1
-
-                        if assigned_zone in ["T", "P"]: tp_tracker[name] = assigned_zone
-                        else: tp_tracker[name] = None
-
-                todays_off_staff = df_shift[df_shift[date_col].astype(str).str.upper() == 'OFF']['姓名'].tolist()
-                for off_name in todays_off_staff:
-                    tp_tracker[off_name] = None
-                    train_brcs_tracker[off_name] = None
-
-                progress_bar.progress((day_idx + 1) / len(date_columns))
-
-            majority_shift_dict = {}
-            for name in all_staff:
-                row_data = df_shift[df_shift['姓名'] == name][date_columns].values.flatten()
-                valid_shifts = [str(x).strip().upper() for x in row_data if str(x).strip().upper() in ['D', 'E', 'N']]
-                major_shift = max(set(valid_shifts), key=valid_shifts.count) if valid_shifts else ""
-                majority_shift_dict[name] = major_shift
-
-            name_col_index = df_result.columns.get_loc('姓名')
-            df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
-
-            zone_count_order = ["L", "L2", "T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "GB", "GC", "GD"]
-            for count_zone in zone_count_order:
-                df_result[count_zone] = df_result[date_columns].apply(lambda row: (row == count_zone).sum(), axis=1)
-
-            summary_total = {'姓名': '各班獨立人數'}
-            summary_d = {'姓名': 'D'}
-            summary_e = {'姓名': 'E'}
-            summary_n = {'姓名': 'N'}
-
-            for date_col in date_columns:
-                daily_shifts = df_shift[date_col].astype(str).str.upper()
-                d_count = (daily_shifts == 'D').sum()
-                e_count = (daily_shifts == 'E').sum()
-                n_count = (daily_shifts == 'N').sum()
-
-                summary_d[date_col] = d_count
-                summary_e[date_col] = e_count
-                summary_n[date_col] = n_count
-                summary_total[date_col] = d_count + e_count + n_count
-
-            df_summary = pd.DataFrame([summary_total, summary_d, summary_e, summary_n])
-            df_result = pd.concat([df_result, df_summary], ignore_index=True)
-            df_result = df_result.fillna("")
-
-            st.success("🎉 排班運算完成！已啟動跨組別防撞雷達，確保區域成員多樣性。")
-            st.dataframe(df_result.head(10))
-
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_result.to_excel(writer, index=False, sheet_name='排班結果')
-            excel_data = output.getvalue()
-
-            st.download_button(
-                label="📥 下載最終排班表 (Excel)", 
-                data=excel_data, 
-                file_name="排班結果_極致跨組分散版.xlsx", 
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        except Exception as e:
-            st.error(f"執行時發生內部錯誤：{e}")
