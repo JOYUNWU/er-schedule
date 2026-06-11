@@ -27,9 +27,15 @@ if training_file and template_file:
         df_shift = pd.read_csv(training_file) if 'csv' in training_file.name.lower() else pd.read_excel(training_file)
         df_template = pd.read_csv(template_file) if 'csv' in template_file.name.lower() else pd.read_excel(template_file)
             
-        base_columns = {df_shift.columns[1]: '組別', df_shift.columns[2]: '性別', df_shift.columns[3]: '姓名'}
-        df_shift = df_shift.rename(columns=base_columns)
-        df_template = df_template.rename(columns=base_columns)
+       # 強制將 df_shift 的第 2, 3, 4 欄 (Index 1, 2, 3) 重新命名
+        shift_cols = list(df_shift.columns)
+        shift_cols[1], shift_cols[2], shift_cols[3] = '組別', '性別', '姓名'
+        df_shift.columns = shift_cols
+        
+        # 強制將 df_template 的第 2, 3, 4 欄 (Index 1, 2, 3) 重新命名
+        template_cols = list(df_template.columns)
+        template_cols[1], template_cols[2], template_cols[3] = '組別', '性別', '姓名'
+        df_template.columns = template_cols
         
         # 資料清洗
         df_shift = df_shift.dropna(subset=['姓名'])
