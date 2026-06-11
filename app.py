@@ -28,12 +28,19 @@ if training_file and template_file:
         df_shift = pd.read_csv(training_file) if 'csv' in training_file.name.lower() else pd.read_excel(training_file)
         df_template = pd.read_csv(template_file) if 'csv' in template_file.name.lower() else pd.read_excel(template_file)
             
+        # 🧹 【完美表頭更新】強制將 df_shift 的欄位重新命名，自動生成 1~31 天
         shift_cols = list(df_shift.columns)
+        shift_cols[0] = '編號'  # 消除最左上角的 Unnamed: 0
         shift_cols[1], shift_cols[2], shift_cols[3] = '組別', '性別', '姓名'
+        date_length = len(shift_cols) - 4
+        shift_cols[4:] = [str(i) for i in range(1, date_length + 1)] # 自動產生 1, 2, 3...
         df_shift.columns = shift_cols
         
+        # 強制將 df_template 的欄位也同步命名
         template_cols = list(df_template.columns)
+        template_cols[0] = '編號'
         template_cols[1], template_cols[2], template_cols[3] = '組別', '性別', '姓名'
+        template_cols[4:4+date_length] = [str(i) for i in range(1, date_length + 1)]
         df_template.columns = template_cols
         
         df_shift = df_shift.dropna(subset=['姓名'])
@@ -289,10 +296,9 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             name_col_index = df_result.columns.get_loc('姓名')
             df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
             
-            # 🌟 新增：在日期最右邊，追加各區域的次數統計欄位
+            # 追加各區域的次數統計欄位
             zone_count_order = ["L", "L2", "T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "GB", "GC", "GD"]
             for count_zone in zone_count_order:
-                # 逐列計算該區域在這個月日期區間內出現的次數
                 df_result[count_zone] = df_result[date_columns].apply(lambda row: (row == count_zone).sum(), axis=1)
 
             # 在表格最下方加入每日班別獨立人數統計
@@ -318,7 +324,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             # 清理表格中的 NaN（空白值），讓 Excel 顯示得更乾淨
             df_result = df_result.fillna("")
             
-            st.success("🎉 排班運算完成！已新增「個人區域統計總表」與「每日獨立人數」。")
+            st.success("🎉 排班運算完成！表頭的 Unnamed 已全部淨化為日期數字。")
             st.dataframe(df_result.head(10))
             
             output = io.BytesIO()
@@ -329,7 +335,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_全自動旗艦版.xlsx", 
+                file_name="排班結果_乾淨表頭版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
