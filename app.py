@@ -18,11 +18,18 @@ if training_file and template_file:
         df_shift = pd.read_csv(training_file) if 'csv' in training_file.name.lower() else pd.read_excel(training_file)
         df_template = pd.read_csv(template_file) if 'csv' in template_file.name.lower() else pd.read_excel(template_file)
             
+        # 重新命名基礎欄位
         base_columns = {df_shift.columns[1]: '組別', df_shift.columns[2]: '性別', df_shift.columns[3]: '姓名'}
         df_shift = df_shift.rename(columns=base_columns)
         df_template = df_template.rename(columns=base_columns)
         
-        all_staff = df_shift['姓名'].dropna().unique().tolist()
+        # 🧹 資料清洗：過濾空白姓名、去除姓名前後的隱形空白鍵
+        df_shift = df_shift.dropna(subset=['姓名'])
+        df_template = df_template.dropna(subset=['姓名'])
+        df_shift['姓名'] = df_shift['姓名'].astype(str).str.strip()
+        df_template['姓名'] = df_template['姓名'].astype(str).str.strip()
+        
+        all_staff = df_shift['姓名'].unique().tolist()
         date_columns = df_shift.columns[4:]
         
         st.success("✅ 檔案讀取成功！請至左側邊欄設定本月訓練與組長規則。")
@@ -89,6 +96,14 @@ if training_file and template_file:
                                 assignments[name] = "T"
                                 unassigned_staff.remove(name)
                                 available_zones.remove("T")
+                            # 補上 B1/R/C2/S 訓練名單邏輯
+                            elif name in train_b1_r:
+                                for target_zone in ["B1", "R", "C2", "S"]:
+                                    if target_zone in available_zones:
+                                        assignments[name] = target_zone
+                                        unassigned_staff.remove(name)
+                                        available_zones.remove(target_zone)
+                                        break
                                 
                         # 3. T/P 連續狀態處理
                         for name in list(unassigned_staff):
@@ -120,9 +135,12 @@ if training_file and template_file:
                                     available_zones.remove(mo_zone)
                                     break
                         
-                        # 6. 剩餘分配 (避開男性去 S2)
+                        # 6. 剩餘分配 (避開男性去 S2，並加入安全保護)
                         for name in list(unassigned_staff):
-                            gender = shift_staff[shift_staff['姓名'] == name]['性別'].values[0]
+                            # 加上防呆，確保能安全抓到性別
+                            gender_series = shift_staff[shift_staff['姓名'] == name]['性別'].values
+                            gender = gender_series[0] if len(gender_series) > 0 else ""
+                            
                             for zone in list(available_zones):
                                 if zone == "S2" and str(gender).upper() == "M": continue
                                 assignments[name] = zone
