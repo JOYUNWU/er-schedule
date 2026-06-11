@@ -94,7 +94,7 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 st.markdown("---")
 
 if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not data_ready):
-    with st.spinner("🧠 啟動各組別專屬守備區域與 D 組優先排序邏輯..."):
+    with st.spinner("🧠 啟動各組白名單與「同班別跨組分散機制」..."):
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
@@ -142,6 +142,11 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                 todays_template.columns = ['姓名', '預設區域']
                 daily_data = pd.merge(todays_shifts, todays_template, on='姓名')
                 
+                # 小幫手函數：取得某人的組別
+                def get_team_of(staff_name):
+                    ts = shift_staff[shift_staff['姓名'] == staff_name]['組別'].values
+                    return str(ts[0]).strip().upper() if len(ts) > 0 else ""
+
                 for shift_type in ['D', 'E', 'N']:
                     shift_staff = daily_data[daily_data['班別'].astype(str).str.upper() == shift_type].copy()
                     staff_count = len(shift_staff)
@@ -256,11 +261,18 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     random.shuffle(unassigned_staff)
                     unassigned_staff.sort(key=get_team_priority)
 
+                    # 🌟 建立同班別群組探測雷達
+                    shift_cluster_teams = {}
+                    for assigned_n, assigned_z in assignments.items():
+                        t_val = get_team_of(assigned_n)
+                        c_val = zone_groups.get(assigned_z, assigned_z)
+                        if c_val not in shift_cluster_teams: shift_cluster_teams[c_val] = set()
+                        shift_cluster_teams[c_val].add(t_val)
+
                     for name in list(unassigned_staff):
                         gender_series = shift_staff[shift_staff['姓名'] == name]['性別'].values
                         gender = gender_series[0] if len(gender_series) > 0 else ""
-                        team_series = shift_staff[shift_staff['姓名'] == name]['組別'].values
-                        team = str(team_series[0]).strip().upper() if len(team_series) > 0 else ""
+                        team = get_team_of(name)
                         recent_groups = history_tracker[name][-2:] if name in history_tracker else []
 
                         team_allowed = team_allowed_zones.get(team, available_zones)
@@ -290,6 +302,16 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             candidate_zones = available_zones.copy() if available_zones else ["支援"]
 
                         pref_candidate_zones = candidate_zones.copy()
+                        
+                        # 🌟 啟動同班別跨組分散機制：過濾掉已經有「同組人」進駐的區域群組
+                        diverse_zones = []
+                        for z in pref_candidate_zones:
+                            c_val = zone_groups.get(z, z)
+                            if team not in shift_cluster_teams.get(c_val, set()):
+                                diverse_zones.append(z)
+                        # 如果還有剩餘乾淨的選擇，就強制套用分散；若無，則允許通融 (避免死胡同)
+                        if diverse_zones:
+                            pref_candidate_zones = diverse_zones
 
                         def get_zone_count(z):
                             if z in ['A2', 'B2', 'C2']: return sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
@@ -320,6 +342,11 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         assignments[name] = chosen_zone
                         unassigned_staff.remove(name)
                         available_zones.remove(chosen_zone)
+                        
+                        # 🌟 將剛剛發配好的同仁紀錄更新到雷達中
+                        assigned_cluster = zone_groups.get(chosen_zone, chosen_zone)
+                        if assigned_cluster not in shift_cluster_teams: shift_cluster_teams[assigned_cluster] = set()
+                        shift_cluster_teams[assigned_cluster].add(team)
 
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
@@ -371,7 +398,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             df_result = pd.concat([df_result, df_summary], ignore_index=True)
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班運算完成！已嚴格套用 A、B、C、D 各組專屬白名單區域。")
+            st.success("🎉 排班運算完成！已啟動跨組別防撞雷達，確保區域成員多樣性。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
@@ -382,7 +409,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_各組白名單嚴格限制版.xlsx", 
+                file_name="排班結果_極致跨組分散版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
