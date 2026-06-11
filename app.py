@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import random
-import io  # 新增：用來將資料轉換成 Excel 檔案格式的套件
+import io
 
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
 st.title("🏥 急診護理人員自動排班系統 (全功能整合版)")
@@ -17,7 +17,6 @@ with col1:
 with col2:
     template_file = st.file_uploader("📂 2. 上傳空白檔", type=['xlsx', 'csv'])
 
-# 初始化變數
 all_staff = []
 df_shift = None
 df_template = None
@@ -29,23 +28,19 @@ if training_file and template_file:
         df_shift = pd.read_csv(training_file) if 'csv' in training_file.name.lower() else pd.read_excel(training_file)
         df_template = pd.read_csv(template_file) if 'csv' in template_file.name.lower() else pd.read_excel(template_file)
             
-        # 強制將 df_shift 的第 2, 3, 4 欄重新命名
         shift_cols = list(df_shift.columns)
         shift_cols[1], shift_cols[2], shift_cols[3] = '組別', '性別', '姓名'
         df_shift.columns = shift_cols
         
-        # 強制將 df_template 的第 2, 3, 4 欄重新命名
         template_cols = list(df_template.columns)
         template_cols[1], template_cols[2], template_cols[3] = '組別', '性別', '姓名'
         df_template.columns = template_cols
         
-        # 資料清洗
         df_shift = df_shift.dropna(subset=['姓名'])
         df_template = df_template.dropna(subset=['姓名'])
         df_shift['姓名'] = df_shift['姓名'].astype(str).str.strip()
         df_template['姓名'] = df_template['姓名'].astype(str).str.strip()
         
-        # 取得人員名單與日期
         all_staff = df_shift['姓名'].unique().tolist()
         date_columns = df_shift.columns[4:]
         data_ready = True
@@ -94,20 +89,22 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 st.markdown("---")
 
 if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not data_ready):
-    with st.spinner("🧠 正在執行邏輯運算與區域輪替中..."):
+    with st.spinner("🧠 正在執行分組邏輯與區域輪替中..."):
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
             history_tracker = {name: [] for name in all_staff}
             progress_bar = st.progress(0)
             
-            # 定義區域群組
             zone_groups = {
                 "MO": "MO_G", "MO1": "MO_G", "MO2": "MO_G",
                 "S": "S_G", "S1": "S_G", "S2": "S_G",
                 "A1": "ABC_G", "B1": "ABC_G", "C1": "ABC_G", "A2": "ABC_G", "B2": "ABC_G", "C2": "ABC_G",
                 "R": "R_G", "R1": "R_G", "R2": "R_G", "R3": "R_G"
             }
+            
+            # 定義 A 組在人力充足時應避開的區域
+            team_a_avoids = ["A1", "R2", "MO", "S1", "C1"]
             
             for day_idx, date_col in enumerate(date_columns):
                 todays_shifts = df_shift[['姓名', '組別', '性別', date_col]].copy()
@@ -190,12 +187,15 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 available_zones.remove(mo_zone)
                                 break
                     
-                    # 6. 剩餘分配 (加入歷史輪替與隨機洗牌機制)
+                    # 6. 剩餘分配 (加入分組限制與記憶輪替)
                     random.shuffle(unassigned_staff) 
                     
                     for name in list(unassigned_staff):
                         gender_series = shift_staff[shift_staff['姓名'] == name]['性別'].values
                         gender = gender_series[0] if len(gender_series) > 0 else ""
+                        
+                        team_series = shift_staff[shift_staff['姓名'] == name]['組別'].values
+                        team = str(team_series[0]).strip().upper() if len(team_series) > 0 else ""
                         
                         recent_groups = history_tracker[name][-2:] if name in history_tracker else []
                         
@@ -206,17 +206,24 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             
                         if not candidate_zones: continue 
                         
-                        best_zones = [z for z in candidate_zones if zone_groups.get(z, z) not in recent_groups]
+                        # A組動態避開邏輯
+                        pref_candidate_zones = candidate_zones.copy()
+                        if team == 'A':
+                            filtered = [z for z in pref_candidate_zones if z not in team_a_avoids]
+                            if len(filtered) > 0: # 代表還有其他區域可選，人力充足，執行避開
+                                pref_candidate_zones = filtered
+                        
+                        best_zones = [z for z in pref_candidate_zones if zone_groups.get(z, z) not in recent_groups]
                         
                         if best_zones:
                             chosen_zone = random.choice(best_zones)
                         else:
                             last_group = history_tracker[name][-1:] if name in history_tracker else []
-                            better_zones = [z for z in candidate_zones if zone_groups.get(z, z) not in last_group]
+                            better_zones = [z for z in pref_candidate_zones if zone_groups.get(z, z) not in last_group]
                             if better_zones:
                                 chosen_zone = random.choice(better_zones)
                             else:
-                                chosen_zone = random.choice(candidate_zones)
+                                chosen_zone = random.choice(pref_candidate_zones)
 
                         assignments[name] = chosen_zone
                         unassigned_staff.remove(name)
@@ -236,10 +243,9 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     
                 progress_bar.progress((day_idx + 1) / len(date_columns))
             
-            st.success("🎉 排班運算完成！區域已根據記憶進行輪替。")
+            st.success("🎉 排班運算完成！區域已根據組別與記憶進行輪替。")
             st.dataframe(df_result.head(10))
             
-            # 🌟 新增：將產出的結果轉為 Excel 檔案供下載
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_result.to_excel(writer, index=False, sheet_name='排班結果')
@@ -248,7 +254,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_輪替版.xlsx", 
+                file_name="排班結果_分組優化版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
