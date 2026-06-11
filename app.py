@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import random  # 引入隨機洗牌套件
 
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
 st.title("🏥 急診護理人員自動排班系統 (全功能整合版)")
@@ -53,7 +54,7 @@ if training_file and template_file:
         st.error(f"檔案讀取失敗，請檢查格式：{e}")
 
 # ==========================================
-# 2. 左側邊欄：動態規則設定 (永遠顯示)
+# 2. 左側邊欄：動態規則設定
 # ==========================================
 st.sidebar.header("⚙️ 本月特殊排班規則設定")
 
@@ -92,11 +93,20 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 st.markdown("---")
 
 if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not data_ready):
-    with st.spinner("🧠 正在執行邏輯運算中..."):
+    with st.spinner("🧠 正在執行邏輯運算與區域輪替中..."):
         try:
             df_result = df_template.copy()
             tp_tracker = {name: None for name in all_staff}
+            history_tracker = {name: [] for name in all_staff} # 新增：歷史區域記憶體
             progress_bar = st.progress(0)
+            
+            # 定義區域群組 (避免連續分配同一群組)
+            zone_groups = {
+                "MO": "MO_G", "MO1": "MO_G", "MO2": "MO_G",
+                "S": "S_G", "S1": "S_G", "S2": "S_G",
+                "A1": "ABC_G", "B1": "ABC_G", "C1": "ABC_G", "A2": "ABC_G", "B2": "ABC_G", "C2": "ABC_G",
+                "R": "R_G", "R1": "R_G", "R2": "R_G", "R3": "R_G"
+            }
             
             for day_idx, date_col in enumerate(date_columns):
                 todays_shifts = df_shift[['姓名', '組別', '性別', date_col]].copy()
@@ -110,7 +120,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     staff_count = len(shift_staff)
                     if staff_count == 0: continue
                     
-                    # 規則 2-6: 開區邏輯
                     base_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S"]
                     if staff_count >= 19: base_zones.append("T2")
                     if staff_count >= 20: base_zones.append("GB")
@@ -155,7 +164,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             unassigned_staff.remove(name)
                             available_zones.remove(prev_tp)
                     
-                    # 4. L 順位指派 (根據當前班別動態抓取)
+                    # 4. L 順位指派
                     if shift_type == 'D':
                         l_chain = [d_l_1, d_l_2, d_l_3]
                     elif shift_type == 'E':
@@ -180,34 +189,48 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 available_zones.remove(mo_zone)
                                 break
                     
-                    # 6. 剩餘分配 (避開男性去 S2)
+                    # 6. 剩餘分配 (加入歷史輪替與隨機洗牌機制)
+                    random.shuffle(unassigned_staff) # 每天隨機打亂未分配名單，確保公平
+                    
                     for name in list(unassigned_staff):
                         gender_series = shift_staff[shift_staff['姓名'] == name]['性別'].values
                         gender = gender_series[0] if len(gender_series) > 0 else ""
                         
+                        # 取得這個人最近 2 次上班的區域群組
+                        recent_groups = history_tracker[name][-2:] if name in history_tracker else []
+                        
+                        candidate_zones = []
                         for zone in list(available_zones):
                             if zone == "S2" and str(gender).upper() == "M": continue
-                            assignments[name] = zone
-                            unassigned_staff.remove(name)
-                            available_zones.remove(zone)
-                            if zone in ["T", "P"]: tp_tracker[name] = zone
-                            break
+                            candidate_zones.append(zone)
+                            
+                        if not candidate_zones: continue # 安全防呆
+                        
+                        # 優先尋找「不在最近兩次群組內」的區域
+                        best_zones = [z for z in candidate_zones if zone_groups.get(z, z) not in recent_groups]
+                        
+                        if best_zones:
+                            chosen_zone = random.choice(best_zones)
+                        else:
+                            # 退而求其次，至少確保跟「昨天」不一樣
+                            last_group = history_tracker[name][-1:] if name in history_tracker else []
+                            better_zones = [z for z in candidate_zones if zone_groups.get(z, z) not in last_group]
+                            if better_zones:
+                                chosen_zone = random.choice(better_zones)
+                            else:
+                                chosen_zone = random.choice(candidate_zones)
 
-                    # 寫回結果
+                        assignments[name] = chosen_zone
+                        unassigned_staff.remove(name)
+                        available_zones.remove(chosen_zone)
+                        if chosen_zone in ["T", "P"]: tp_tracker[name] = chosen_zone
+
+                    # 寫回結果與歷史記憶
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
+                        
+                        # 將今天的群組紀錄寫入該同仁的歷史記憶中
+                        group = zone_groups.get(assigned_zone, assigned_zone)
+                        history_tracker[name].append(group)
 
                 # 解除 OFF 人員的 TP 狀態
-                todays_off_staff = df_shift[df_shift[date_col].astype(str).str.upper() == 'OFF']['姓名'].tolist()
-                for off_name in todays_off_staff:
-                    tp_tracker[off_name] = None
-                    
-                progress_bar.progress((day_idx + 1) / len(date_columns))
-            
-            st.success("🎉 排班運算完成！")
-            st.dataframe(df_result.head(10))
-            csv = df_result.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(label="📥 下載最終排班表 (CSV)", data=csv, file_name="排班結果_最新版.csv", mime="text/csv")
-            
-        except Exception as e:
-            st.error(f"執行時發生內部錯誤：{e}")
