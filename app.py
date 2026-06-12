@@ -11,12 +11,15 @@ def get_team_of(staff_name, df_daily):
     ts = df_daily[df_daily['姓名'] == staff_name]['組別'].values
     return str(ts[0]).strip().upper() if len(ts) > 0 else ""
 
+# 更新：適應 5 組的優先度排序 (限制越多的越優先排)
 def get_team_priority(staff_name, df_daily):
     t = get_team_of(staff_name, df_daily)
-    if t == 'D': return 1
-    elif t == 'C': return 2
-    elif t == 'B': return 3
-    else: return 4
+    if t == 'E': return 1
+    elif t == 'D': return 2
+    elif t == 'C': return 3
+    elif t == 'B': return 4
+    elif t == 'A': return 5
+    else: return 6
 
 def get_zone_count(z, m_counts, s_name):
     if z in ['A2', 'B2', 'C2']: 
@@ -135,11 +138,13 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                 "GB": "G_G", "GC": "G_G", "GD": "G_G"
             }
             
+            # 更新：改為 5 組，並調整各組可上的區域
             team_allowed_zones = {
                 'A': ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
                 'B': ["A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
-                'C': ["A1", "C1", "A2", "B2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
-                'D': ["A1", "R2", "MO", "MO1", "S1"]
+                'C': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
+                'D': ["A1", "C1", "A2", "R1", "R2", "P", "MO", "MO1", "S1"],
+                'E': ["A1", "R2", "MO", "MO1", "S1"]
             }
             
             MAX_DAYS = {
@@ -174,7 +179,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     unassigned_staff = shift_staff['姓名'].tolist()
                     assignments = {}
                     
-                    # 1. 決定基礎區域 (基於當班總人數)
                     if staff_count <= 17:
                         base_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S"]
                     elif staff_count == 18:
@@ -191,14 +195,13 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         base_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GB", "GC", "GD"]
 
                     available_zones = base_zones.copy()
-                    target_zone_count = staff_count - 1 # 扣除 L 的隱形名額
+                    target_zone_count = staff_count - 1 
                     
                     while len(available_zones) < target_zone_count:
                         available_zones.append(f"支援{len(available_zones)+1}")
                     if len(available_zones) > target_zone_count:
                         available_zones = available_zones[:target_zone_count]
                     
-                    # 🌟 2. 不動檔霸王條款 (最優先執行！)
                     for _, row in shift_staff.iterrows():
                         name, preset = row['姓名'], str(row['預設區域']).strip()
                         if preset.upper() not in ['X', 'NAN', 'NONE', ''] and name in unassigned_staff:
@@ -212,7 +215,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 elif available_zones: 
                                     available_zones.pop()
                     
-                    # 🌟 3. L 順位指派 (如果 L 還沒被手動佔走才派)
                     if "L" not in assignments.values():
                         if shift_type == 'D': l_chain = [d_l_1, d_l_2, d_l_3]
                         elif shift_type == 'E': l_chain = [e_l_1, e_l_2, e_l_3]
@@ -225,7 +227,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 unassigned_staff.remove(l_candidate)
                                 break
                     
-                    # 4. 訓練名單優先綁定
                     for name in list(unassigned_staff):
                         if name in train_s2:
                             assignments[name] = "S2"
@@ -254,7 +255,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                 if chosen_train in available_zones: available_zones.remove(chosen_train)
                                 elif available_zones: available_zones.pop()
                             
-                    # 5. T/P 連續狀態處理
                     for name in list(unassigned_staff):
                         prev_tp = tp_tracker.get(name)
                         if prev_tp in ["T", "P"]:
@@ -267,7 +267,6 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             else:
                                 tp_tracker[name] = None
                                 
-                    # 6. 連啟倫鎖定
                     if "N連啟倫" in unassigned_staff:
                         chosen = "MO" if monthly_counts["N連啟倫"].get("MO",0) <= monthly_counts["N連啟倫"].get("MO1",0) else "MO1"
                         assignments["N連啟倫"] = chosen
@@ -275,7 +274,35 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                         if chosen in available_zones: available_zones.remove(chosen)
                         elif available_zones: available_zones.pop()
                     
-                    # 7. 剩餘隨機與跨組均分分配
+                    # ---------------------------------------------------------------------
+                    # 6.5 新增：優先區域綁定 (組別 E 與 D)
+                    # ---------------------------------------------------------------------
+                    
+                    # 優先 A1, R2, MO, MO1, S1 給組別 E
+                    team_e_staff = [n for n in unassigned_staff if get_team_of(n, shift_staff) == 'E']
+                    team_e_priority_zones = ["A1", "R2", "MO", "MO1", "S1"]
+                    for name in team_e_staff:
+                        avail_for_e = [z for z in team_e_priority_zones if z in available_zones]
+                        if avail_for_e:
+                            # 為了平均分配，找出該人員站過最少次的優先區域
+                            avail_for_e.sort(key=lambda z: get_zone_count(z, monthly_counts, name))
+                            min_count = get_zone_count(avail_for_e[0], monthly_counts, name)
+                            lowest_zones = [z for z in avail_for_e if get_zone_count(z, monthly_counts, name) == min_count]
+                            chosen_zone = random.choice(lowest_zones)
+                            
+                            assignments[name] = chosen_zone
+                            unassigned_staff.remove(name)
+                            available_zones.remove(chosen_zone)
+
+                    # 優先 A2 給組別 D
+                    team_d_staff = [n for n in unassigned_staff if get_team_of(n, shift_staff) == 'D']
+                    for name in team_d_staff:
+                        if "A2" in available_zones:
+                            assignments[name] = "A2"
+                            unassigned_staff.remove(name)
+                            available_zones.remove("A2")
+                    # ---------------------------------------------------------------------
+
                     random.shuffle(unassigned_staff)
                     unassigned_staff.sort(key=lambda x: get_team_priority(x, shift_staff))
 
@@ -407,18 +434,19 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             df_result = pd.concat([df_result, df_summary], ignore_index=True)
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班運算完成！已啟動「絕對尊重不動檔」與「組長遞補機制」。")
+            st.success("🎉 第一階段排班運算完成！已為您準備好雙分頁(Double-Sheet)格式。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_result.to_excel(writer, index=False, sheet_name='排班結果')
+                df_shift.to_excel(writer, index=False, sheet_name='原始班表')
             excel_data = output.getvalue()
 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_不動檔霸王條款版.xlsx", 
+                file_name="排班結果_可手動換班版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
