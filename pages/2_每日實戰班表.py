@@ -67,21 +67,19 @@ if t_file and r_file and a_file:
 
         sorted_days = sorted(list(date_cols_t.keys()), key=int)
 
-        if st.button("🚀 開始轉出每日實戰班表 (6人直式版)"):
-            output_cols = []
-            for i in range(1, 7):
-                output_cols.extend([f'Name_{i}', f'Zone_{i}'])
-
+        if st.button("🚀 開始轉出每日實戰班表 (6人直式完美對齊)"):
+            
+            # ✅ 修改點 1：將欄位簡化為單純的 6 個直行 (Col_1 到 Col_6)
+            output_cols = [f'Col_{i}' for i in range(1, 7)]
             final_rows = []
 
             for day in sorted_days:
-                final_rows.append({k: (f"=== 6月 {day} 日 ===" if k == 'Name_1' else "") for k in output_cols})
+                final_rows.append({output_cols[0]: f"=== 本月 {day} 日 ==="})
 
                 for shift_code, time_label in [('D', "7'-4"), ('E', "3'-12"), ('N', "11'-8")]:
                     final_rows.append({
-                        'Name_1': f"【{shift_code}班】",
-                        'Zone_1': time_label,
-                        **{k: "" for k in output_cols[2:]}
+                        output_cols[0]: f"【{shift_code}班】",
+                        output_cols[1]: time_label
                     })
 
                     shift_staff_list = []
@@ -106,23 +104,23 @@ if t_file and r_file and a_file:
                         if shift_code in today_aide_shift:
                             shift_staff_list.append((aide_name, "護佐"))
 
-                    # C. 6 人一列排版
+                    # C. ✅ 修改點 2：強制名字與區域放在同一個欄位上下對齊
                     for i in range(0, len(shift_staff_list), 6):
                         chunk = shift_staff_list[i:i+6]
                         name_row = {k: "" for k in output_cols}
                         zone_row = {k: "" for k in output_cols}
 
                         for idx, (s_name, s_zone) in enumerate(chunk):
-                            col_idx = idx + 1
-                            name_row[f'Name_{col_idx}'] = s_name
-                            zone_row[f'Zone_{col_idx}'] = s_zone
+                            col_key = output_cols[idx] # 對準 Col_1, Col_2...
+                            name_row[col_key] = s_name
+                            zone_row[col_key] = s_zone
 
                         final_rows.append(name_row)
                         final_rows.append(zone_row)
 
-                    final_rows.append({k: "" for k in output_cols}) 
+                    final_rows.append({k: "" for k in output_cols}) # 班別間留白
 
-                final_rows.append({k: "------------------------" for k in output_cols}) 
+                final_rows.append({output_cols[0]: "------------------------"}) # 每日中斷線
 
             df_final = pd.DataFrame(final_rows, columns=output_cols)
             
@@ -136,10 +134,10 @@ if t_file and r_file and a_file:
             st.download_button(
                 label="📥 下載實戰班表 Excel 檔案",
                 data=buffer.getvalue(),
-                file_name="每日實戰班表_6人直向完美版.xlsx",
+                file_name="每日實戰班表_完美對齊版.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("🎉 實戰班表已成功生成！全自動偵測欄位，護理師、PT與護佐皆已完美歸位。")
+            st.success("🎉 實戰班表已成功生成！人員與區域已百分之百完美垂直對齊！")
 
     except Exception as e:
         st.error(f"發生錯誤：{e}")
