@@ -5,7 +5,7 @@ import random
 import io
 
 # ==========================================
-# 0. 頂層小幫手函數 (大區定義與計分系統)
+# 0. 頂層小幫手函數 (含合併結算與大區定義)
 # ==========================================
 def get_team_of(staff_name, df_daily):
     ts = df_daily[df_daily['姓名'] == staff_name]['組別'].values
@@ -21,16 +21,18 @@ def get_team_priority(staff_name, df_daily):
     elif t == 'A': return 6
     else: return 7
 
+# 🌟 第 5 點：當月總計合併結算 (確保同組在這幾個大區總次數平均)
 def get_zone_count(z, m_counts, s_name):
     if z in ['A2', 'B2', 'C2']: return sum(m_counts[s_name].get(x, 0) for x in ['A2', 'B2', 'C2'])
-    if z in ['GB', 'GC', 'GD']: return sum(m_counts[s_name].get(x, 0) for x in ['GB', 'GC', 'GD'])
+    if z in ['MO', 'MO1', 'MO2']: return sum(m_counts[s_name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
+    if z in ['GC', 'GB', 'T2']: return sum(m_counts[s_name].get(x, 0) for x in ['GC', 'GB', 'T2'])
     return m_counts[s_name].get(z, 0)
 
 def get_macro(zone):
     if zone in ["MO", "MO1", "MO2"]: return "OBS"
     if zone in ["S", "S1", "S2"]: return "SURG"
     if zone in ["R", "R1", "R2", "R3"]: return "RESUS"
-    if zone in ["A2", "B1", "B2", "C1", "C2"]: return "MED"
+    if zone in ["A2", "B1", "B2", "C1", "C2", "A1"]: return "MED"
     if zone in ["GB", "GC", "GD"]: return "G"
     if zone in ["T", "T2"]: return "TRIAGE"
     if zone in ["P", "P2"]: return "PEDS"
@@ -39,9 +41,9 @@ def get_macro(zone):
 def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
-# AI 權重計分系統
+# 🌟 AI 權重計分系統 (包含任務成就解鎖)
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts):
-    score = get_zone_count(zone, monthly_counts, name) * 10 
+    score = get_zone_count(zone, monthly_counts, name) * 10 # 基礎次數平衡
 
     past_zones = []
     for i in [1, 2]: 
@@ -53,17 +55,44 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_macros = [get_macro(pz) for pz in past_zones]
     past_severe = any(is_severe(pz) for pz in past_zones)
 
+    # 防撞跳區懲罰
     if get_macro(zone) in past_macros: score += 2000
     if is_severe(zone) and past_severe: score += 2000
 
-    if team in ['A', 'B', 'C']:
-        if zone in ["MO", "MO1", "MO2"]:
-            if sum(monthly_counts[name].get(x, 0) for x in ["MO", "MO1", "MO2"]) == 0: score -= 800
-        if zone in ["T2", "GB", "GC", "GD"]:
-            if sum(monthly_counts[name].get(x, 0) for x in ["T2", "GB", "GC", "GD"]) == 0: score -= 600
+    # 🌟 第 2 點：所有人至少去過 MO 或 MO1 或 MO2
+    if zone in ["MO", "MO1", "MO2"]:
+        if sum(monthly_counts[name].get(x, 0) for x in ["MO", "MO1", "MO2"]) == 0: 
+            score -= 800
 
+    # 🌟 第 3 點：組別 A 盡可能安排 T2, GB, GC, GD
+    if team == 'A' and zone in ["T2", "GB", "GC", "GD"]:
+        if sum(monthly_counts[name].get(x, 0) for x in ["T2", "GB", "GC", "GD"]) == 0: 
+            score -= 800
+
+    # 🌟 第 4 點：組別 B 盡可能安排 GB
+    if team == 'B' and zone == "GB":
+        if monthly_counts[name].get("GB", 0) == 0: 
+            score -= 800
+
+    # 🌟 第 1 點：各組必站一次的成就解鎖
+    req_A = ["B1", "B2", "C2", "R", "R1", "R3", "MO2", "S2", "S"]
+    req_B = ["B1", "B2", "C1", "C2", "R", "R1", "R3", "MO2", "S2", "S"]
+    req_C = ["A2", "A1", "B2", "R1", "R3", "S2", "C1"]
+    req_D = ["A2", "A1", "B2", "R1", "S1"]
+    
+    if team == 'A' and zone in req_A:
+        if monthly_counts[name].get(zone, 0) == 0: score -= 700
+    elif team == 'B' and zone in req_B:
+        if monthly_counts[name].get(zone, 0) == 0: score -= 700
+    elif team == 'C' and zone in req_C:
+        if monthly_counts[name].get(zone, 0) == 0: score -= 700
+    elif team == 'D' and zone in req_D:
+        if monthly_counts[name].get(zone, 0) == 0: score -= 700
+
+    # A組避開新人區
     if team == 'A' and zone in ['A1', 'S1', 'R2']: score += 1500
 
+    # 天數上限保護 (MO, 內科不設上限)
     if monthly_counts.get(name, {}).get(zone, 0) >= 3 and zone not in ["MO", "MO1", "MO2", "A2", "B1", "B2", "C1", "C2"]:
         score += 5000
 
@@ -73,7 +102,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
 # 網頁 UI 初始化
 # ==========================================
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
-st.title("🏥 急診護理人員自動排班系統 (動態人力對位版)")
+st.title("🏥 急診護理人員自動排班系統 (公平歷練版)")
 st.markdown("---")
 
 col1, col2 = st.columns(2)
@@ -131,11 +160,12 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
             
+            # 🌟 更新：把 B2 加入組別 D 的合法清單中
             team_allowed_zones = {
                 'A': ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
                 'B': ["A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
                 'C': ["A1", "C1", "A2", "B2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
-                'D': ["A1", "C1", "A2", "R1", "R2", "P", "MO", "MO1", "S1"],
+                'D': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "S1"],
                 'E': ["A1", "A2", "R2", "MO", "MO1", "P", "S1"],
                 'F': ["A1", "R2", "MO", "MO1", "S1"]
             }
@@ -155,7 +185,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                     assignments = {}
                     pre_assigned_zones = []
                     
-                    # 💡 1. 第一步：先將手動預排(包含公假、會議等)的人從排班名單中抽出
                     for _, row in shift_staff.iterrows():
                         name, preset = row['姓名'], str(row['預設區域']).strip()
                         if preset.upper() not in ['X', 'NAN', 'NONE', ''] and name in unassigned_staff:
@@ -163,7 +192,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                             unassigned_staff.remove(name)
                             pre_assigned_zones.append(preset)
                     
-                    # 2. 處理 L 順位
                     if "L" not in assignments.values():
                         l_chain = [d_l_1, d_l_2, d_l_3] if shift_type == 'D' else [e_l_1, e_l_2, e_l_3] if shift_type == 'E' else [n_l_1, n_l_2, n_l_3]
                         for l_cand in l_chain:
@@ -172,26 +200,22 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                                 unassigned_staff.remove(l_cand)
                                 break
 
-                    # 💡 3. 使用者天才邏輯：真正需要安排區域的人數，就是剩下 unassigned_staff 的長度！
                     target_zone_count = len(unassigned_staff)
-                    
                     full_priority_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S", "S2", "R3", "T2", "GB", "GC", "GD"]
                     available_zones = []
                     
-                    # 依序把需要的區域拉進來，並跳過已經被預排佔走的位置
                     for z in full_priority_zones:
                         if len(available_zones) >= target_zone_count: break
                         if z not in pre_assigned_zones:
                             available_zones.append(z)
 
-                    # 若 X 的數量真的多到超過急診所有能開的區域，自動從重要區域依序複製補齊
                     filler_zones = ["MO", "A2", "B2", "C1", "C2", "R1", "S1", "MO1", "B1"]
                     f_idx = 0
                     while len(available_zones) < target_zone_count:
                         available_zones.append(filler_zones[f_idx % len(filler_zones)])
                         f_idx += 1
                     
-                    # 🌟 4. 連續排班機制 (強制連上直到OFF)
+                    # 連續排班機制
                     continuous_reqs = []
                     for name in list(unassigned_staff):
                         if day_idx > 0:
@@ -213,7 +237,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                             unassigned_staff.remove(name)
                             available_zones.remove(z)
 
-                    # 🌟 5. 新訓防撞分配
+                    # 新訓防撞分配
                     for t_list, t_zone in [(train_s2, "S2"), (train_t, "T")]:
                         cands = [n for n in list(unassigned_staff) if n in t_list]
                         if cands and t_zone in available_zones:
@@ -239,7 +263,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                             unassigned_staff.remove("N連啟倫")
                             available_zones.remove(chosen)
                     
-                    # 🌟 6. F組/E組剛放完假回來的優先配區 
+                    # F組/E組剛放完假回來的優先配區
                     for name in [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'F']:
                         a_zones = [z for z in ["A1", "R2", "MO", "MO1", "S1"] if z in available_zones]
                         if a_zones:
@@ -258,7 +282,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                                 unassigned_staff.remove(name)
                                 available_zones.remove("A2")
 
-                    # 🌟 7. AI 計分歸建分配
+                    # AI 計分歸建分配
                     random.shuffle(unassigned_staff)
                     unassigned_staff.sort(key=lambda x: get_team_priority(x, shift_staff))
 
@@ -290,14 +314,14 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
             df_result = df_result.fillna("")
 
-            st.success("🎉 動態人力計分版排班完成！已完美依據您的 'X' 數量開啟區域，徹底消滅幽靈支援。")
+            st.success("🎉 AI 權重計分版排班完成！歷練次數完美平均，必站區域已強制解鎖。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_result.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_動態人力完美版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_公平歷練版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
