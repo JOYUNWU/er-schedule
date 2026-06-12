@@ -11,14 +11,16 @@ def get_team_of(staff_name, df_daily):
     ts = df_daily[df_daily['姓名'] == staff_name]['組別'].values
     return str(ts[0]).strip().upper() if len(ts) > 0 else ""
 
+# 🌟 更新：適應 6 組的優先度排序 (限制越多的越優先排)
 def get_team_priority(staff_name, df_daily):
     t = get_team_of(staff_name, df_daily)
-    if t == 'E': return 1
-    elif t == 'D': return 2
-    elif t == 'C': return 3
-    elif t == 'B': return 4
-    elif t == 'A': return 5
-    else: return 6
+    if t == 'F': return 1
+    elif t == 'E': return 2
+    elif t == 'D': return 3
+    elif t == 'C': return 4
+    elif t == 'B': return 5
+    elif t == 'A': return 6
+    else: return 7
 
 def get_zone_count(z, m_counts, s_name):
     if z in ['A2', 'B2', 'C2']: 
@@ -152,12 +154,14 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
             
+            # 🌟 更新：6組的允許區域設定
             team_allowed_zones = {
                 'A': ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
                 'B': ["A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
-                'C': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
+                'C': ["A1", "C1", "A2", "B2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
                 'D': ["A1", "C1", "A2", "R1", "R2", "P", "MO", "MO1", "S1"],
-                'E': ["A1", "R2", "MO", "MO1", "S1"]
+                'E': ["A1", "A2", "R2", "MO", "MO1", "P", "S1"],
+                'F': ["A1", "R2", "MO", "MO1", "S1"]
             }
             
             MAX_DAYS = {
@@ -241,9 +245,10 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                                                  (name in train_t and prev_zone == "T") or \
                                                  (name in train_b1_r and prev_zone in ["B1", "R", "S", "C2"])
                                     is_TP = prev_zone in ["T", "P"]
-                                    is_team_E = (get_team_of(name, shift_staff) == 'E')
+                                    # 🌟 更新：組別 F 也列入強迫連上的對象
+                                    is_team_F = (get_team_of(name, shift_staff) == 'F')
                                     
-                                    if is_trainee or is_TP or is_team_E:
+                                    if is_trainee or is_TP or is_team_F:
                                         continuous_requests.append({'name': name, 'zone': prev_zone, 'is_trainee': is_trainee})
                     
                     # 讓訓練生優先搶走連續名額
@@ -259,7 +264,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                     # =======================================================
                     # 🌟 4. 新訓啟動與平均分配 (防撞與歸建機制)
                     # =======================================================
-                    # (A) S2 訓練 (用分配次數判斷，沒搶到的人自動回到一般池)
+                    # (A) S2 訓練
                     s2_candidates = [n for n in list(unassigned_staff) if n in train_s2]
                     if s2_candidates:
                         s2_candidates.sort(key=lambda n: monthly_counts[n].get("S2", 0))
@@ -301,32 +306,35 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
                             available_zones.remove(chosen)
                     
                     # =======================================================
-                    # 6. E組與D組的優先選區 (適用於剛放完 OFF 回來的人)
-                    team_e_staff = [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'E']
-                    team_e_priority_zones = ["A1", "R2", "MO", "MO1", "S1"]
-                    for name in team_e_staff:
+                    # 🌟 6. F組與E組的優先選區 (適用於剛放完 OFF 回來，要重新分配戰區的人)
+                    
+                    # (A) F 組優先拿 A1, R2, MO, MO1, S1
+                    team_f_staff = [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'F']
+                    team_f_priority_zones = ["A1", "R2", "MO", "MO1", "S1"]
+                    for name in team_f_staff:
                         f_macros, f_severe = get_forbidden_zones(name, day_idx, df_result, date_columns)
-                        avail_for_e = []
-                        for z in team_e_priority_zones:
+                        avail_for_f = []
+                        for z in team_f_priority_zones:
                             if z in available_zones:
                                 # 確認這個區域不違反「跳過2天大區」和「重症不連上」的規範
                                 if get_macro(z) not in f_macros and not (f_severe and is_severe(z)):
-                                    avail_for_e.append(z)
+                                    avail_for_f.append(z)
                         
-                        if not avail_for_e:
-                            avail_for_e = [z for z in team_e_priority_zones if z in available_zones]
+                        if not avail_for_f:
+                            avail_for_f = [z for z in team_f_priority_zones if z in available_zones]
 
-                        if avail_for_e:
-                            avail_for_e.sort(key=lambda z: get_zone_count(z, monthly_counts, name))
-                            min_count = get_zone_count(avail_for_e[0], monthly_counts, name)
-                            lowest_zones = [z for z in avail_for_e if get_zone_count(z, monthly_counts, name) == min_count]
+                        if avail_for_f:
+                            avail_for_f.sort(key=lambda z: get_zone_count(z, monthly_counts, name))
+                            min_count = get_zone_count(avail_for_f[0], monthly_counts, name)
+                            lowest_zones = [z for z in avail_for_f if get_zone_count(z, monthly_counts, name) == min_count]
                             chosen_zone = random.choice(lowest_zones)
                             assignments[name] = chosen_zone
                             unassigned_staff.remove(name)
                             available_zones.remove(chosen_zone)
 
-                    team_d_staff = [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'D']
-                    for name in team_d_staff:
+                    # (B) E 組優先拿 A2
+                    team_e_staff = [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'E']
+                    for name in team_e_staff:
                         if "A2" in available_zones:
                             f_macros, f_severe = get_forbidden_zones(name, day_idx, df_result, date_columns)
                             if get_macro("A2") not in f_macros:
@@ -439,7 +447,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             df_result = pd.concat([df_result, df_summary], ignore_index=True)
             df_result = df_result.fillna("")
 
-            st.success("🎉 終極排班運算完成！已啟動「訓練防撞與平均歸建」及「嚴格跳2天與重症防過勞」機制。")
+            st.success("🎉 終極排班運算完成！已啟動「6組戰區部署」、「F組連續霸王條款」與「重症防過勞」機制。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
@@ -451,7 +459,7 @@ if st.button("🚀 開始自動排班運算 (套用上述規則)", disabled=not 
             st.download_button(
                 label="📥 下載最終排班表 (Excel)", 
                 data=excel_data, 
-                file_name="排班結果_終極防撞跳區版.xlsx", 
+                file_name="排班結果_6組陣型版.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
