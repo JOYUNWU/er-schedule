@@ -5,7 +5,7 @@ import random
 import io
 
 # ==========================================
-# 0. 頂層小幫手函數 (含合併結算與大區定義)
+# 0. 頂層小幫手函數
 # ==========================================
 def get_team_of(staff_name, df_daily):
     ts = df_daily[df_daily['姓名'] == staff_name]['組別'].values
@@ -21,7 +21,6 @@ def get_team_priority(staff_name, df_daily):
     elif t == 'A': return 6
     else: return 7
 
-# 🌟 大區合併結算：確保這三大群組次數絕對公平
 def get_zone_count(z, m_counts, s_name):
     if z in ['A2', 'B2', 'C2']: return sum(m_counts[s_name].get(x, 0) for x in ['A2', 'B2', 'C2'])
     if z in ['MO', 'MO1', 'MO2']: return sum(m_counts[s_name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
@@ -41,9 +40,9 @@ def get_macro(zone):
 def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
-# 🌟 終極 AI 權重計分系統 (包含任務成就解鎖與壓線判斷)
+# 🌟 終極 AI 權重計分系統 (上下限強制鎖定)
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks):
-    score = get_zone_count(zone, monthly_counts, name) * 100 # 基礎次數平衡
+    score = get_zone_count(zone, monthly_counts, name) * 100 
 
     past_zones = []
     for i in [1, 2]: 
@@ -59,35 +58,108 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     if get_macro(zone) in past_macros: score += 20000
     if is_severe(zone) and past_severe: score += 20000
 
-    # 🌟 每人必解任務：至少去過 MO 或 MO1 或 MO2
-    if zone in ["MO", "MO1", "MO2"]:
-        if sum(monthly_counts[name].get(x, 0) for x in ["MO", "MO1", "MO2"]) == 0: 
-            score -= 10000
+    # ==================================================
+    # 🌟 各組精確上下限鎖定 (低於下限強力拉入，高於上限強力封殺)
+    # ==================================================
+    if team in ['A', 'B']:
+        if zone in ['MO', 'MO1', 'MO2']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone in ['GB', 'GC', 'T2']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC', 'T2'])
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone == 'R':
+            c = monthly_counts[name].get('R', 0)
+            if c < 1: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone == 'B1':
+            c = monthly_counts[name].get('B1', 0)
+            if c < 1: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone in ['R1', 'R3']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['R1', 'R3'])
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone in ['A2', 'B2', 'C2']: # C3校正為C2
+            c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
+            if c < 3: score -= 8000
+            elif c >= 4: score += 50000
+        elif zone == 'S':
+            c = monthly_counts[name].get('S', 0)
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone == 'S2':
+            c = monthly_counts[name].get('S2', 0)
+            if c < 1: score -= 8000
+            elif c >= 2: score += 50000
 
-    # 🌟 組別 A 輕鬆區輪流制 (保證均分)
-    if team == 'A' and zone in ["T2", "GB", "GC", "GD"]:
-        sum_easy = sum(monthly_counts[name].get(x, 0) for x in ["T2", "GB", "GC", "GD"])
-        if sum_easy == 0: 
-            score -= 9000
-        else:
-            score += sum_easy * 5000 # 如果已經去過，大幅降低優先權讓給別人
+    elif team == 'C':
+        if zone in ['MO', 'MO1', 'MO2']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone in ['GB', 'GC']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC'])
+            if c < 1: score -= 8000
+            elif c >= 2: score += 50000
+        elif zone in ['R1', 'R3']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['R1', 'R3'])
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone in ['A2', 'B2', 'C2']: # C3校正為C2
+            c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
+            if c < 3: score -= 8000
+            elif c >= 5: score += 50000
+        elif zone == 'S2':
+            c = monthly_counts[name].get('S2', 0)
+            if c < 1: score -= 8000
+            elif c >= 2: score += 50000
+        elif zone == 'C1':
+            c = monthly_counts[name].get('C1', 0)
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone == 'A1':
+            c = monthly_counts[name].get('A1', 0)
+            if c < 1: score -= 8000
+            elif c >= 2: score += 50000
 
-    # 🌟 組別 B 盡可能安排 GB
-    if team == 'B' and zone == "GB":
-        if monthly_counts[name].get("GB", 0) == 0: 
-            score -= 9000
+    elif team == 'D':
+        if zone == 'P':
+            c = monthly_counts[name].get('P', 0)
+            if c < 1: score -= 8000
+        elif zone == 'R1':
+            c = monthly_counts[name].get('R1', 0)
+            if c < 1: score -= 8000
+            elif c >= 2: score += 50000
+        elif zone == 'C1':
+            c = monthly_counts[name].get('C1', 0)
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone == 'A1':
+            c = monthly_counts[name].get('A1', 0)
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
+        elif zone == 'S1':
+            c = monthly_counts[name].get('S1', 0)
+            if c < 2: score -= 8000
+            elif c >= 3: score += 50000
 
-    # 🌟 各組必站一次的成就解鎖
-    req_A = ["B1", "B2", "C2", "R", "R1", "R3", "MO2", "S2", "S"]
-    req_B = ["B1", "B2", "C1", "C2", "R", "R1", "R3", "MO2", "S2", "S"]
-    req_C = ["A2", "A1", "B2", "R1", "R3", "S2", "C1"]
-    req_D = ["A2", "A1", "B2", "R1", "S1"]
-    
-    if team == 'A' and zone in req_A and monthly_counts[name].get(zone, 0) == 0: score -= 8000
-    elif team == 'B' and zone in req_B and monthly_counts[name].get(zone, 0) == 0: score -= 8000
-    elif team == 'C' and zone in req_C and monthly_counts[name].get(zone, 0) == 0: score -= 8000
-    elif team == 'D' and zone in req_D and monthly_counts[name].get(zone, 0) == 0: score -= 8000
+    elif team == 'E':
+        if zone == 'P':
+            c = monthly_counts[name].get('P', 0)
+            if c < 1: score -= 8000
+        elif zone == 'A2':
+            c = monthly_counts[name].get('A2', 0)
+            if c < 3: score -= 8000
+            elif c >= 4: score += 50000
+        elif zone == 'R2':
+            c = monthly_counts[name].get('R2', 0)
+            if c < 3: score -= 8000
+            elif c >= 4: score += 50000
 
+    # ==================================================
     # 🌟 A組避開新人區
     if team == 'A' and zone in ['A1', 'S1', 'R2']: score += 15000
 
@@ -95,17 +167,13 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     if zone in ['T', 'P'] and work_blocks[name][day_idx] > 3:
         score += 50000 # 嚴格封殺：連續上班>3天時，不准進入T/P
 
-    # 一般天數上限保護
-    if monthly_counts.get(name, {}).get(zone, 0) >= 3 and zone not in ["MO", "MO1", "MO2", "A2", "B1", "B2", "C1", "C2"]:
-        score += 8000
-
     return score
 
 # ==========================================
 # 網頁 UI 初始化
 # ==========================================
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
-st.title("🏥 急診護理人員自動排班系統 (壓線防護公平版)")
+st.title("🏥 急診護理人員自動排班系統 (極限鎖定版)")
 st.markdown("---")
 
 col1, col2 = st.columns(2)
@@ -149,7 +217,7 @@ d_l_1 = st.sidebar.selectbox("D班 第一順位", safe_options("AHN黃麗婷"))
 d_l_2 = st.sidebar.selectbox("D班 第二順位", safe_options("N3尤美惠"))
 d_l_3 = st.sidebar.selectbox("D班 第三順位", safe_options("N3許嘉文"))
 e_l_1 = st.sidebar.selectbox("E班 第一順位", safe_options("AHN蕭惠澤"))
-e_l_2 = st.sidebar.selectbox("E班 第二順位", safe_options("N2李曉侖"))
+e_l_2 = st.selectbox("E班 第二順位", safe_options("N2李曉侖"))
 e_l_3 = st.sidebar.selectbox("E班 第三順位", safe_options("N3黃義全"))
 n_l_1 = st.sidebar.selectbox("N班 第一順位", safe_options("N3許慧芳"))
 n_l_2 = st.sidebar.selectbox("N班 第二順位", safe_options("N2江品儒"))
@@ -157,13 +225,12 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🧠 精算壓線連上與成就解鎖中..."):
+    with st.spinner("🧠 嚴格執行各組次數封閉鎖定中..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
             
-            # 建立連續天數預判系統 (計算到下一次 OFF 還有幾天)
             work_blocks = {name: [0]*len(date_columns) for name in all_staff}
             for name in all_staff:
                 for day_idx in range(len(date_columns)):
@@ -284,14 +351,14 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                             z_scores = [(z, get_zone_score(z, name, 'F', day_idx, df_result, date_columns, monthly_counts, work_blocks)) for z in a_zones]
                             z_scores.sort(key=lambda x: x[1])
                             best_z, best_s = z_scores[0]
-                            if best_s < 2000: 
+                            if best_s < 20000: 
                                 assignments[name] = best_z
                                 unassigned_staff.remove(name)
                                 available_zones.remove(best_z)
 
                     for name in [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'E']:
                         if "A2" in available_zones:
-                            if get_zone_score("A2", name, 'E', day_idx, df_result, date_columns, monthly_counts, work_blocks) < 2000:
+                            if get_zone_score("A2", name, 'E', day_idx, df_result, date_columns, monthly_counts, work_blocks) < 20000:
                                 assignments[name] = "A2"
                                 unassigned_staff.remove(name)
                                 available_zones.remove("A2")
@@ -327,26 +394,25 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             majority_shift_dict = {name: max(set([x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']]), key=[x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']].count) if [x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']] else "" for name in all_staff}
             df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
             
-            # 🌟 月底總計生成 (包含大區專屬合計欄)
+            # 月底總計生成 (包含大區專屬合計欄)
             zone_count_order = ["L", "L2", "T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "GB", "GC", "GD", "職代"]
             for count_zone in zone_count_order:
                 df_result[count_zone] = df_result[date_columns].apply(lambda row: (row == count_zone).sum(), axis=1)
             
-            # 加入三大區合併結算欄位
             df_result['A2+B2+C2計'] = df_result[['A2', 'B2', 'C2']].sum(axis=1)
             df_result['MO系計'] = df_result[['MO', 'MO1', 'MO2']].sum(axis=1)
             df_result['GC+GB+T2計'] = df_result[['GC', 'GB', 'T2']].sum(axis=1)
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！已完美執行 T/P 壓線截斷法、次數絕對均分，並將統計結果附於右側！")
+            st.success("🎉 排班完成！各組次數限制已完美鎖定。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_result.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_公平歷練總計版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_極限鎖定版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
