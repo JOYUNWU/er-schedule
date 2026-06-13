@@ -43,13 +43,13 @@ def is_severe(zone):
 def apply_limit(c, min_val, soft_val, max_val):
     if c < min_val: return -8000
     elif c >= max_val: return 50000
-    elif c >= soft_val: return 5000 # 滿了之後讓給別人
+    elif c >= soft_val: return 5000 
     else: return c * 100
 
 # ==========================================
-# 🌟 終極 AI 權重計分系統 (上下限強制鎖定)
+# 🌟 終極 AI 權重計分系統 (加入大區混合機制)
 # ==================================================
-def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks):
+def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams):
     score = 0 
 
     past_zones = []
@@ -62,12 +62,17 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_macros = [get_macro(pz) for pz in past_zones]
     past_severe = any(is_severe(pz) for pz in past_zones)
 
-    # 防撞跳區懲罰 (跳2天)
+    # 1 & 2. 防撞跳區懲罰與重症錯開
     if get_macro(zone) in past_macros: score += 20000
     if is_severe(zone) and past_severe: score += 20000
 
+    # 🌟 3. 大區涵蓋不同組別 (同大區已有同組人員，則加上懲罰排開)
+    macro_z = get_macro(zone)
+    if team in current_day_macro_teams.get(macro_z, set()):
+        score += 3000 # 中度懲罰，促使系統將機會讓給其他組別 (資深帶資淺)
+
     # ==================================================
-    # 🌟 各組精確上下限鎖定 (軟保底與硬天花板)
+    # 🌟 各組精確上下限鎖定 
     if team in ['A', 'B']:
         if zone in ['MO', 'MO1', 'MO2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
@@ -118,7 +123,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         if zone in ['GB', 'GC']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC'])
             if c < 1: score -= 8000
-            elif c >= 1: score += 50000 # 嚴格封殺第2次
+            elif c >= 1: score += 50000 
         elif zone in ['A2', 'B2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2'])
             score += apply_limit(c, 2, 3, 4)
@@ -140,19 +145,18 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         elif zone == 'R2':
             score += apply_limit(monthly_counts[name].get('R2', 0), 0, 3, 4)
 
-    # ==================================================
     # 🌟 A1, S1, R2 盡量保留給 F 與 E 組
     if zone in ['A1', 'S1', 'R2']: 
-        if team == 'A': score += 20000 # 嚴格避讓
-        elif team in ['B', 'C', 'D']: score += 8000 # 次等避讓
+        if team == 'A': score += 20000 
+        elif team in ['B', 'C', 'D']: score += 8000 
 
-    # 🌟 T與P的壓線截斷防護 (拒絕不合適的連續天數進場)
+    # 🌟 T與P的壓線截斷防護
     if zone in ['T', 'P']:
         prev_zone = past_zones[0] if len(past_zones) > 0 else ""
-        if prev_zone not in ['T', 'P']: # 如果是「第一天」要進去 T 或 P
+        if prev_zone not in ['T', 'P']: 
             days_to_off = work_blocks[name][day_idx]
-            if days_to_off < 2: score += 50000 # 剩不到2天，禁止進去
-            elif days_to_off > 3: score += 50000 # 還有4天以上，禁止進去，等明天或後天
+            if days_to_off < 2: score += 50000 
+            elif days_to_off > 3: score += 50000 
 
     # 通用天花板保護
     explicit_zones = ["MO","MO1","MO2","GB","GC","T2","R","B1","R1","R3","A2","B2","C2","S","S2","C1","A1","S1","P","R2"]
@@ -165,7 +169,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
 # 網頁 UI 初始化
 # ==========================================
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
-st.title("🏥 急診護理人員自動排班系統 (極限鎖定版)")
+st.title("🏥 急診護理人員自動排班系統 (極限鎖定混合版)")
 st.markdown("---")
 
 col1, col2 = st.columns(2)
@@ -218,24 +222,20 @@ n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
-# 🌟 Excel 螢光黃標記函數
 def highlight_b1_r(val):
     try:
-        if pd.to_numeric(val) > 3:
-            return 'background-color: #FFFF00'
-    except:
-        pass
+        if pd.to_numeric(val) > 3: return 'background-color: #FFFF00'
+    except: pass
     return ''
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🧠 嚴格執行次數軟保底、硬天花板鎖定與壓線防護中..."):
+    with st.spinner("🧠 嚴格執行大區資深資淺混排與上下限鎖定中..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
             
-            # 計算距離下一個 OFF 還有幾天
             work_blocks = {name: [0]*len(date_columns) for name in all_staff}
             for name in all_staff:
                 for day_idx in range(len(date_columns)):
@@ -301,7 +301,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         available_zones.append(filler_zones[f_idx % len(filler_zones)])
                         f_idx += 1
                     
-                    # 🌟 連啟倫霸王鎖定 (無視庫存強制塞入 MO/MO1)
+                    # 🌟 連啟倫霸王鎖定
                     if "N連啟倫" in unassigned_staff:
                         chosen = "MO" if monthly_counts.get("N連啟倫", {}).get("MO",0) <= monthly_counts.get("N連啟倫", {}).get("MO1",0) else "MO1"
                         assignments["N連啟倫"] = chosen
@@ -309,9 +309,9 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         if chosen in available_zones:
                             available_zones.remove(chosen)
                         else:
-                            if available_zones: available_zones.pop() # 把別的區域擠掉
+                            if available_zones: available_zones.pop()
 
-                    # 連續排班機制 (強制連上)
+                    # 連續排班機制
                     continuous_reqs = []
                     for name in list(unassigned_staff):
                         if day_idx > 0:
@@ -351,24 +351,38 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                             unassigned_staff.remove(name)
                             available_zones.remove(v_zones[0])
                     
-                    # F組/E組剛放完假回來的優先配區
+                    # 🌟 建立目前班別的大區與組別追蹤，用於 AI 計分防撞
+                    current_day_macro_teams = {}
+                    for assigned_name, assigned_z in assignments.items():
+                        t_val = get_team_of(assigned_name, shift_staff)
+                        m_val = get_macro(assigned_z)
+                        if m_val not in current_day_macro_teams: current_day_macro_teams[m_val] = set()
+                        current_day_macro_teams[m_val].add(t_val)
+
+                    # F/E 優先配區
                     for name in [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'F']:
                         a_zones = [z for z in ["A1", "R2", "MO", "MO1", "S1"] if z in available_zones]
                         if a_zones:
-                            z_scores = [(z, get_zone_score(z, name, 'F', day_idx, df_result, date_columns, monthly_counts, work_blocks)) for z in a_zones]
+                            z_scores = [(z, get_zone_score(z, name, 'F', day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams)) for z in a_zones]
                             z_scores.sort(key=lambda x: x[1])
                             best_z, best_s = z_scores[0]
                             if best_s < 20000: 
                                 assignments[name] = best_z
                                 unassigned_staff.remove(name)
                                 available_zones.remove(best_z)
+                                m_val = get_macro(best_z)
+                                if m_val not in current_day_macro_teams: current_day_macro_teams[m_val] = set()
+                                current_day_macro_teams[m_val].add('F')
 
                     for name in [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'E']:
                         if "A2" in available_zones:
-                            if get_zone_score("A2", name, 'E', day_idx, df_result, date_columns, monthly_counts, work_blocks) < 20000:
+                            if get_zone_score("A2", name, 'E', day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams) < 20000:
                                 assignments[name] = "A2"
                                 unassigned_staff.remove(name)
                                 available_zones.remove("A2")
+                                m_val = get_macro("A2")
+                                if m_val not in current_day_macro_teams: current_day_macro_teams[m_val] = set()
+                                current_day_macro_teams[m_val].add('E')
 
                     # AI 計分歸建分配
                     random.shuffle(unassigned_staff)
@@ -383,13 +397,18 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         if not valid_cands: valid_cands = [z for z in available_zones if not (z == "S2" and str(gender).upper() == "M")]
                         if not valid_cands: valid_cands = available_zones.copy()
 
-                        z_scores = [(z, get_zone_score(z, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks)) for z in valid_cands]
+                        z_scores = [(z, get_zone_score(z, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams)) for z in valid_cands]
                         z_scores.sort(key=lambda x: x[1])
                         
                         chosen_zone = z_scores[0][0]
                         assignments[name] = chosen_zone
                         unassigned_staff.remove(name)
                         if chosen_zone in available_zones: available_zones.remove(chosen_zone)
+                        
+                        # 即時更新大區組別追蹤
+                        m_val = get_macro(chosen_zone)
+                        if m_val not in current_day_macro_teams: current_day_macro_teams[m_val] = set()
+                        current_day_macro_teams[m_val].add(team)
 
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
@@ -412,17 +431,16 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！已完美套用嚴格的『下限強力拉入與上限強力封殺』邏輯，連啟倫專區與 T/P 壓線機制也準備就緒。")
+            st.success("🎉 排班完成！已補上大區資深資淺混排邏輯！")
             st.dataframe(df_result.head(10))
 
-            # 🌟 加入 Excel 螢光黃標記
             styled_df = df_result.style.map(highlight_b1_r, subset=['B1', 'R'] if 'B1' in df_result.columns and 'R' in df_result.columns else [])
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 styled_df.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel 螢光黃標示版)", data=output.getvalue(), file_name="排班結果_螢光黃標示版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載最終排班表 (Excel 螢光黃標示版)", data=output.getvalue(), file_name="排班結果_大區混排鎖定版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
