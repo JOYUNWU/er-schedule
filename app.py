@@ -40,9 +40,15 @@ def get_macro(zone):
 def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
+# 💡 智慧次數管控引擎 (低於下限強力拉入，達標後可隨機，高於上限強力封殺)
+def apply_limit(c, base, max_limit):
+    if c < base: return -8000
+    elif c >= max_limit: return 50000
+    else: return c * 100 # 在 base 與 max 之間的隨機緩衝區
+
 # 🌟 終極 AI 權重計分系統
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks):
-    score = get_zone_count(zone, monthly_counts, name) * 100 
+    score = get_zone_count(zone, monthly_counts, name) * 10 
 
     past_zones = []
     for i in [1, 2]: 
@@ -54,93 +60,91 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_macros = [get_macro(pz) for pz in past_zones]
     past_severe = any(is_severe(pz) for pz in past_zones)
 
+    # 防撞跳區懲罰 (跳2天)
     if get_macro(zone) in past_macros: score += 20000
     if is_severe(zone) and past_severe: score += 20000
 
+    # ==================================================
+    # 🌟 各組精確上下限鎖定 (依照最新規則)
+    # ==================================================
     if team in ['A', 'B']:
         if zone in ['MO', 'MO1', 'MO2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone in ['GB', 'GC', 'T2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC', 'T2'])
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone == 'R':
             c = monthly_counts[name].get('R', 0)
-            if c < 1: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone == 'B1':
             c = monthly_counts[name].get('B1', 0)
-            if c < 1: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone in ['R1', 'R3']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['R1', 'R3'])
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
-        elif zone in ['A2', 'B2', 'C2']:
+            score += apply_limit(c, 2, 3)
+        elif zone in ['A2', 'B2', 'C2']: 
             c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
-            if c < 3: score -= 8000
-            elif c >= 4: score += 50000
+            score += apply_limit(c, 3, 4)
         elif zone == 'S':
             c = monthly_counts[name].get('S', 0)
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone == 'S2':
             c = monthly_counts[name].get('S2', 0)
-            if c < 1: score -= 8000
-            elif c >= 2: score += 50000
+            score += apply_limit(c, 2, 3)
 
     elif team == 'C':
         if zone in ['MO', 'MO1', 'MO2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone in ['GB', 'GC']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC'])
-            if c < 1: score -= 8000
-            elif c >= 2: score += 50000
+            score += apply_limit(c, 1, 2)
         elif zone in ['R1', 'R3']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['R1', 'R3'])
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone in ['A2', 'B2', 'C2']: 
             c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
-            if c < 3: score -= 8000
-            elif c >= 5: score += 50000
+            score += apply_limit(c, 3, 4)
         elif zone == 'S2':
             c = monthly_counts[name].get('S2', 0)
-            if c < 1: score -= 8000
-            elif c >= 2: score += 50000
+            score += apply_limit(c, 1, 2)
         elif zone == 'C1':
             c = monthly_counts[name].get('C1', 0)
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 2, 3)
         elif zone == 'A1':
             c = monthly_counts[name].get('A1', 0)
-            if c < 1: score -= 8000
-            elif c >= 2: score += 50000
-
-    elif team == 'D':
-        if zone == 'P':
-            c = monthly_counts[name].get('P', 0)
-            if c < 1: score -= 8000
-        elif zone == 'R1':
-            c = monthly_counts[name].get('R1', 0)
-            if c < 1: score -= 8000
-            elif c >= 2: score += 50000
-        elif zone == 'C1':
-            c = monthly_counts[name].get('C1', 0)
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
-        elif zone == 'A1':
-            c = monthly_counts[name].get('A1', 0)
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 1, 2)
         elif zone == 'S1':
             c = monthly_counts[name].get('S1', 0)
-            if c < 2: score -= 8000
-            elif c >= 3: score += 50000
+            score += apply_limit(c, 1, 2)
+
+    elif team == 'D':
+        if zone in ['GB', 'GC']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC'])
+            score += apply_limit(c, 1, 1) # 只上一次
+        elif zone in ['A2', 'B2']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2'])
+            score += apply_limit(c, 3, 4)
+        elif zone == 'R1':
+            c = monthly_counts[name].get('R1', 0)
+            score += apply_limit(c, 2, 3)
+        elif zone in ['MO', 'MO1', 'MO2']:
+            c = sum(monthly_counts[name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
+            score += apply_limit(c, 2, 3)
+        elif zone == 'S1':
+            c = monthly_counts[name].get('S1', 0)
+            score += apply_limit(c, 2, 3)
+        # 未特別限制的保留前版設定
+        elif zone == 'P':
+            c = monthly_counts[name].get('P', 0)
+            if c < 1: score -= 8000
+        elif zone == 'C1':
+            c = monthly_counts[name].get('C1', 0)
+            score += apply_limit(c, 2, 3)
+        elif zone == 'A1':
+            c = monthly_counts[name].get('A1', 0)
+            score += apply_limit(c, 2, 3)
 
     elif team == 'E':
         if zone == 'P':
@@ -148,17 +152,24 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             if c < 1: score -= 8000
         elif zone == 'A2':
             c = monthly_counts[name].get('A2', 0)
-            if c < 3: score -= 8000
-            elif c >= 4: score += 50000
+            score += apply_limit(c, 3, 4)
         elif zone == 'R2':
             c = monthly_counts[name].get('R2', 0)
-            if c < 3: score -= 8000
-            elif c >= 4: score += 50000
+            score += apply_limit(c, 3, 4)
 
-    if team == 'A' and zone in ['A1', 'S1', 'R2']: score += 15000
+    # ==================================================
+    # 🌟 A組避開新人區 (A1, S1) - 讓位給 CDEF 組
+    if team == 'A' and zone in ['A1', 'S1', 'R2']: 
+        score += 20000
 
+    # 🌟 T與P的壓線截斷防護
     if zone in ['T', 'P'] and work_blocks[name][day_idx] > 3:
         score += 50000 
+
+    # 通用天花板保護 (避開封閉清單外的溢出)
+    explicit_zones = ["MO","MO1","MO2","GB","GC","T2","R","B1","R1","R3","A2","B2","C2","S","S2","C1","A1","S1","P","R2"]
+    if zone not in explicit_zones and monthly_counts.get(name, {}).get(zone, 0) >= 3:
+        score += 8000
 
     return score
 
@@ -199,14 +210,13 @@ if training_file and template_file:
         st.error(f"檔案讀取失敗：{e}")
 
 # ==========================================
-# 左側設定區 (修正美觀版)
+# 左側設定區 
 # ==========================================
 st.sidebar.header("⚙️ 本月特殊排班規則設定")
 train_s2 = st.sidebar.multiselect("S2 訓練名單", options=all_staff if data_ready else [])
 train_b1_r = st.sidebar.multiselect("B1/R/C2/S 訓練名單", options=all_staff if data_ready else [])
 train_t = st.sidebar.multiselect("檢傷(T) 訓練名單", options=all_staff if data_ready else [])
 
-# ✅ 將預設值改為 "請點選"
 leader_options = ["請點選"] + all_staff if data_ready else ["請點選"]
 
 st.sidebar.subheader("👑 各班組長順位")
@@ -214,7 +224,7 @@ d_l_1 = st.sidebar.selectbox("D班 第一順位", leader_options)
 d_l_2 = st.sidebar.selectbox("D班 第二順位", leader_options)
 d_l_3 = st.sidebar.selectbox("D班 第三順位", leader_options)
 e_l_1 = st.sidebar.selectbox("E班 第一順位", leader_options)
-e_l_2 = st.sidebar.selectbox("E班 第二順位", leader_options) # ✅ 修正：把丟失的 sidebar 補回來了！
+e_l_2 = st.sidebar.selectbox("E班 第二順位", leader_options)
 e_l_3 = st.sidebar.selectbox("E班 第三順位", leader_options)
 n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
@@ -222,7 +232,7 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🧠 嚴格執行各組次數封閉鎖定中..."):
+    with st.spinner("🧠 嚴格執行各組次數軟保底與硬天花板鎖定中..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
@@ -239,11 +249,12 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         count += 1
                     work_blocks[name][day_idx] = count
 
+            # 🌟 加入 C、D 組的新增允許區域 (C2, MO2, GB, GC) 確保有入場券
             team_allowed_zones = {
                 'A': ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
                 'B': ["A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
-                'C': ["A1", "C1", "A2", "B2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
-                'D': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "S1"],
+                'C': ["A1", "B1", "C1", "A2", "B2", "C2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
+                'D': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "GB", "GC"],
                 'E': ["A1", "A2", "R2", "MO", "MO1", "P", "S1"],
                 'F': ["A1", "R2", "MO", "MO1", "S1"]
             }
@@ -402,14 +413,14 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！E班組長第二順位已歸位，所有選單皆預設為「請點選」。")
+            st.success("🎉 排班完成！已完美套用嚴格的『下限強力拉入與上限強力封殺』邏輯。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_result.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_極限鎖定版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_封閉鎖定版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
