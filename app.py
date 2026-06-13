@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import random
 import io
+from openpyxl.styles import PatternFill # 🌟 匯入顏色標記套件
 
 # ==========================================
 # 0. 頂層小幫手函數
@@ -40,11 +41,11 @@ def get_macro(zone):
 def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
-# 💡 智慧次數管控引擎 (低於下限強力拉入，達標後可隨機，高於上限強力封殺)
+# 💡 智慧次數管控引擎
 def apply_limit(c, base, max_limit):
     if c < base: return -8000
     elif c >= max_limit: return 50000
-    else: return c * 100 # 在 base 與 max 之間的隨機緩衝區
+    else: return c * 100 
 
 # 🌟 終極 AI 權重計分系統
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks):
@@ -60,12 +61,11 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_macros = [get_macro(pz) for pz in past_zones]
     past_severe = any(is_severe(pz) for pz in past_zones)
 
-    # 防撞跳區懲罰 (跳2天)
     if get_macro(zone) in past_macros: score += 20000
     if is_severe(zone) and past_severe: score += 20000
 
     # ==================================================
-    # 🌟 各組精確上下限鎖定 (依照最新規則)
+    # 🌟 各組精確上下限鎖定
     # ==================================================
     if team in ['A', 'B']:
         if zone in ['MO', 'MO1', 'MO2']:
@@ -122,7 +122,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     elif team == 'D':
         if zone in ['GB', 'GC']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['GB', 'GC'])
-            score += apply_limit(c, 1, 1) # 只上一次
+            score += apply_limit(c, 1, 1) 
         elif zone in ['A2', 'B2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2'])
             score += apply_limit(c, 3, 4)
@@ -135,38 +135,30 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         elif zone == 'S1':
             c = monthly_counts[name].get('S1', 0)
             score += apply_limit(c, 2, 3)
-        # 未特別限制的保留前版設定
-        elif zone == 'P':
-            c = monthly_counts[name].get('P', 0)
-            if c < 1: score -= 8000
-        elif zone == 'C1':
-            c = monthly_counts[name].get('C1', 0)
-            score += apply_limit(c, 2, 3)
-        elif zone == 'A1':
-            c = monthly_counts[name].get('A1', 0)
-            score += apply_limit(c, 2, 3)
-
-    elif team == 'E':
-        if zone == 'P':
-            c = monthly_counts[name].get('P', 0)
-            if c < 1: score -= 8000
-        elif zone == 'A2':
-            c = monthly_counts[name].get('A2', 0)
-            score += apply_limit(c, 3, 4)
-        elif zone == 'R2':
-            c = monthly_counts[name].get('R2', 0)
-            score += apply_limit(c, 3, 4)
 
     # ==================================================
-    # 🌟 A組避開新人區 (A1, S1) - 讓位給 CDEF 組
-    if team == 'A' and zone in ['A1', 'S1', 'R2']: 
-        score += 20000
+    # 🌟 A1, S1, R2 絕對保留給 E 與 F
+    if zone in ['A1', 'S1', 'R2']: 
+        if team == 'A': score += 50000 # A組絕對封殺
+        elif team not in ['E', 'F']: score += 8000 # B, C, D組不鼓勵
+        elif team in ['E', 'F']: score -= 8000 # 強力拉攏 E, F
 
-    # 🌟 T與P的壓線截斷防護
-    if zone in ['T', 'P'] and work_blocks[name][day_idx] > 3:
-        score += 50000 
+    # 🌟 T的壓線防護與A組任務解鎖
+    if zone == 'T':
+        is_continuing_T = (day_idx > 0 and df_result.loc[df_result['姓名'] == name, date_columns[day_idx - 1]].values[0] == 'T')
+        if not is_continuing_T:
+            if work_blocks[name][day_idx] < 2:
+                score += 50000 # 嚴格封殺：連續上班天數不夠，不准開始T班
+        if team == 'A' and monthly_counts[name].get('T', 0) == 0:
+            score -= 5000 # 優先讓A組解鎖T
 
-    # 通用天花板保護 (避開封閉清單外的溢出)
+    # 🌟 P的壓線防護
+    if zone == 'P':
+        is_continuing_P = (day_idx > 0 and df_result.loc[df_result['姓名'] == name, date_columns[day_idx - 1]].values[0] == 'P')
+        if not is_continuing_P and work_blocks[name][day_idx] < 2:
+            score += 50000
+
+    # 通用天花板保護
     explicit_zones = ["MO","MO1","MO2","GB","GC","T2","R","B1","R1","R3","A2","B2","C2","S","S2","C1","A1","S1","P","R2"]
     if zone not in explicit_zones and monthly_counts.get(name, {}).get(zone, 0) >= 3:
         score += 8000
@@ -177,7 +169,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
 # 網頁 UI 初始化
 # ==========================================
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
-st.title("🏥 急診護理人員自動排班系統 (極限鎖定版)")
+st.title("🏥 急診護理人員自動排班系統 (次數鎖定與螢光標示版)")
 st.markdown("---")
 
 col1, col2 = st.columns(2)
@@ -209,9 +201,7 @@ if training_file and template_file:
     except Exception as e:
         st.error(f"檔案讀取失敗：{e}")
 
-# ==========================================
-# 左側設定區 
-# ==========================================
+# 左側設定
 st.sidebar.header("⚙️ 本月特殊排班規則設定")
 train_s2 = st.sidebar.multiselect("S2 訓練名單", options=all_staff if data_ready else [])
 train_b1_r = st.sidebar.multiselect("B1/R/C2/S 訓練名單", options=all_staff if data_ready else [])
@@ -249,7 +239,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         count += 1
                     work_blocks[name][day_idx] = count
 
-            # 🌟 加入 C、D 組的新增允許區域 (C2, MO2, GB, GC) 確保有入場券
             team_allowed_zones = {
                 'A': ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
                 'B': ["A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
@@ -304,6 +293,15 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         available_zones.append(filler_zones[f_idx % len(filler_zones)])
                         f_idx += 1
                     
+                    # 🌟 N連啟倫 霸王鎖定 (要在排班初期優先鎖定)
+                    if "N連啟倫" in unassigned_staff:
+                        mo_zones = [z for z in ["MO", "MO1"] if z in available_zones]
+                        if mo_zones:
+                            chosen = min(mo_zones, key=lambda z: monthly_counts.get("N連啟倫", {}).get(z, 0))
+                            assignments["N連啟倫"] = chosen
+                            unassigned_staff.remove("N連啟倫")
+                            available_zones.remove(chosen)
+
                     # 連續排班機制
                     continuous_reqs = []
                     for name in list(unassigned_staff):
@@ -343,16 +341,8 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                             assignments[name] = v_zones[0]
                             unassigned_staff.remove(name)
                             available_zones.remove(v_zones[0])
-
-                    # 連啟倫鎖定
-                    if "N連啟倫" in unassigned_staff:
-                        chosen = "MO" if monthly_counts.get("N連啟倫", {}).get("MO",0) <= monthly_counts.get("N連啟倫", {}).get("MO1",0) else "MO1"
-                        if chosen in available_zones:
-                            assignments["N連啟倫"] = chosen
-                            unassigned_staff.remove("N連啟倫")
-                            available_zones.remove(chosen)
                     
-                    # F組/E組剛放完假回來的優先配區
+                    # F組/E組優先配區
                     for name in [n for n in list(unassigned_staff) if get_team_of(n, shift_staff) == 'F']:
                         a_zones = [z for z in ["A1", "R2", "MO", "MO1", "S1"] if z in available_zones]
                         if a_zones:
@@ -413,14 +403,29 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！已完美套用嚴格的『下限強力拉入與上限強力封殺』邏輯。")
+            st.success("🎉 排班完成！已啟動次數封閉鎖定，且當 B1 或 R 次數超過 3 次時，下載的 Excel 將自動以「螢光黃」網底標記該儲存格。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_result.to_excel(writer, index=False, sheet_name='排班結果')
+                
+                # 🌟 實作：匯出 Excel 時，幫 B1 或 R > 3 的儲存格加上螢光黃網底
+                workbook = writer.book
+                worksheet = writer.sheets['排班結果']
+                b1_idx = df_result.columns.get_loc('B1') + 1
+                r_idx = df_result.columns.get_loc('R') + 1
+                yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+                
+                for row in range(2, len(df_result) + 2): # 跳過標題列
+                    for col_idx in [b1_idx, r_idx]:
+                        val = worksheet.cell(row=row, column=col_idx).value
+                        if isinstance(val, (int, float)) and val > 3:
+                            worksheet.cell(row=row, column=col_idx).fill = yellow_fill
+
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_封閉鎖定版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            st.download_button("📥 下載最終排班表 (Excel)", data=output.getvalue(), file_name="排班結果_螢光鎖定版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
