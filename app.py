@@ -40,7 +40,7 @@ def get_macro(zone):
 def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
-# 🌟 終極 AI 權重計分系統 (上下限強制鎖定)
+# 🌟 終極 AI 權重計分系統
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks):
     score = get_zone_count(zone, monthly_counts, name) * 100 
 
@@ -54,13 +54,9 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_macros = [get_macro(pz) for pz in past_zones]
     past_severe = any(is_severe(pz) for pz in past_zones)
 
-    # 防撞跳區懲罰 (跳2天)
     if get_macro(zone) in past_macros: score += 20000
     if is_severe(zone) and past_severe: score += 20000
 
-    # ==================================================
-    # 🌟 各組精確上下限鎖定 (低於下限強力拉入，高於上限強力封殺)
-    # ==================================================
     if team in ['A', 'B']:
         if zone in ['MO', 'MO1', 'MO2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
@@ -82,7 +78,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             c = sum(monthly_counts[name].get(x, 0) for x in ['R1', 'R3'])
             if c < 2: score -= 8000
             elif c >= 3: score += 50000
-        elif zone in ['A2', 'B2', 'C2']: # C3校正為C2
+        elif zone in ['A2', 'B2', 'C2']:
             c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
             if c < 3: score -= 8000
             elif c >= 4: score += 50000
@@ -108,7 +104,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             c = sum(monthly_counts[name].get(x, 0) for x in ['R1', 'R3'])
             if c < 2: score -= 8000
             elif c >= 3: score += 50000
-        elif zone in ['A2', 'B2', 'C2']: # C3校正為C2
+        elif zone in ['A2', 'B2', 'C2']: 
             c = sum(monthly_counts[name].get(x, 0) for x in ['A2', 'B2', 'C2'])
             if c < 3: score -= 8000
             elif c >= 5: score += 50000
@@ -159,13 +155,10 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             if c < 3: score -= 8000
             elif c >= 4: score += 50000
 
-    # ==================================================
-    # 🌟 A組避開新人區
     if team == 'A' and zone in ['A1', 'S1', 'R2']: score += 15000
 
-    # 🌟 T與P的壓線截斷防護 (拒絕提早進入T/P導致跳區)
     if zone in ['T', 'P'] and work_blocks[name][day_idx] > 3:
-        score += 50000 # 嚴格封殺：連續上班>3天時，不准進入T/P
+        score += 50000 
 
     return score
 
@@ -205,23 +198,27 @@ if training_file and template_file:
     except Exception as e:
         st.error(f"檔案讀取失敗：{e}")
 
-# 左側設定
+# ==========================================
+# 左側設定區 (修正美觀版)
+# ==========================================
 st.sidebar.header("⚙️ 本月特殊排班規則設定")
 train_s2 = st.sidebar.multiselect("S2 訓練名單", options=all_staff if data_ready else [])
 train_b1_r = st.sidebar.multiselect("B1/R/C2/S 訓練名單", options=all_staff if data_ready else [])
 train_t = st.sidebar.multiselect("檢傷(T) 訓練名單", options=all_staff if data_ready else [])
 
-def safe_options(default_val): return list(dict.fromkeys([default_val] + all_staff)) if data_ready else []
+# ✅ 將預設值改為 "請點選"
+leader_options = ["請點選"] + all_staff if data_ready else ["請點選"]
+
 st.sidebar.subheader("👑 各班組長順位")
-d_l_1 = st.sidebar.selectbox("D班 第一順位", safe_options("AHN黃麗婷"))
-d_l_2 = st.sidebar.selectbox("D班 第二順位", safe_options("N3尤美惠"))
-d_l_3 = st.sidebar.selectbox("D班 第三順位", safe_options("N3許嘉文"))
-e_l_1 = st.sidebar.selectbox("E班 第一順位", safe_options("AHN蕭惠澤"))
-e_l_2 = st.selectbox("E班 第二順位", safe_options("N2李曉侖"))
-e_l_3 = st.sidebar.selectbox("E班 第三順位", safe_options("N3黃義全"))
-n_l_1 = st.sidebar.selectbox("N班 第一順位", safe_options("N3許慧芳"))
-n_l_2 = st.sidebar.selectbox("N班 第二順位", safe_options("N2江品儒"))
-n_l_3 = st.sidebar.selectbox("N班 第三順位", safe_options("N1許家瑄"))
+d_l_1 = st.sidebar.selectbox("D班 第一順位", leader_options)
+d_l_2 = st.sidebar.selectbox("D班 第二順位", leader_options)
+d_l_3 = st.sidebar.selectbox("D班 第三順位", leader_options)
+e_l_1 = st.sidebar.selectbox("E班 第一順位", leader_options)
+e_l_2 = st.sidebar.selectbox("E班 第二順位", leader_options) # ✅ 修正：把丟失的 sidebar 補回來了！
+e_l_3 = st.sidebar.selectbox("E班 第三順位", leader_options)
+n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
+n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
+n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
@@ -296,7 +293,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         available_zones.append(filler_zones[f_idx % len(filler_zones)])
                         f_idx += 1
                     
-                    # 連續排班機制 (強制連上)
+                    # 連續排班機制
                     continuous_reqs = []
                     for name in list(unassigned_staff):
                         if day_idx > 0:
@@ -394,7 +391,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             majority_shift_dict = {name: max(set([x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']]), key=[x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']].count) if [x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']] else "" for name in all_staff}
             df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
             
-            # 月底總計生成 (包含大區專屬合計欄)
+            # 月底總計生成
             zone_count_order = ["L", "L2", "T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "GB", "GC", "GD", "職代"]
             for count_zone in zone_count_order:
                 df_result[count_zone] = df_result[date_columns].apply(lambda row: (row == count_zone).sum(), axis=1)
@@ -405,7 +402,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！各組次數限制已完美鎖定。")
+            st.success("🎉 排班完成！E班組長第二順位已歸位，所有選單皆預設為「請點選」。")
             st.dataframe(df_result.head(10))
 
             output = io.BytesIO()
