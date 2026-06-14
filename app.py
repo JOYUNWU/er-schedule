@@ -47,12 +47,8 @@ def is_severe(zone):
 # ==================================================
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled):
     
-    # 💡 核心變革：萬分級等差倍率！
-    # 0次=0分, 1次=10000分, 2次=20000分。
-    # 徹底移除人為寫死的上限，讓系統天然尋找次數最少的人，保證一層層均勻鋪滿！
     score = get_zone_count(zone, monthly_counts, name) * 10000 
 
-    # 💡 絕對禁區：A組絕對不上 R2, A2, S1
     if team == 'A' and zone in ['R2', 'A2', 'S1']:
         score += 5000000 
 
@@ -66,16 +62,13 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_macros = [get_macro(pz) for pz in past_zones]
     past_severe = any(is_severe(pz) for pz in past_zones)
 
-    # 💡 絕對防護網：跳 2 天大區與重症錯開
     if get_macro(zone) in past_macros: score += 5000000
     if is_severe(zone) and past_severe: score += 5000000
 
-    # 💡 大區資深資淺混排
     macro_z = get_macro(zone)
     if team in current_day_macro_teams.get(macro_z, set()):
         score += 20000 
 
-    # 💡 T與P的壓線進場預判防護
     if zone in ['T', 'P']:
         prev_zone = past_zones[0] if len(past_zones) > 0 else ""
         if prev_zone not in ['T', 'P']: 
@@ -83,21 +76,14 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             if days_to_off not in [2, 3]: 
                 score += 5000000 
 
-    # 💡 GB/GC 的 A/B 組解任務優先權，及 D組的單次鐵規則
     if zone in ['GB', 'GC']:
         c = get_zone_count(zone, monthly_counts, name)
         if team in ['A', 'B'] and c == 0:
             score -= 100000 
         elif team in ['C', 'D', 'E'] and not ab_gb_gc_fulfilled:
             score += 20000 
-        
-        # D組只上一次是明確的例外規則，因此保留封殺
         if team == 'D' and c >= 1: score += 5000000
 
-    # ==========================================
-    # 🌟 階梯式消化順序 (當大家次數平手時的溢出安插)
-    # 這裡的扣分只有數百，絕對無法超越 10000 分的「次數壁壘」
-    # ==========================================
     if zone == 'B1':
         if team == 'B': score -= 400
         elif team == 'A': score -= 300
@@ -131,7 +117,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
 # 網頁 UI 初始化
 # ==========================================
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
-st.title("🏥 急診護理人員自動排班系統 (無寫死上限·純淨均分版)")
+st.title("🏥 急診護理人員自動排班系統 (人機協作視覺化版)")
 st.markdown("---")
 
 col1, col2 = st.columns(2)
@@ -184,15 +170,21 @@ n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
-def highlight_b1_r(val):
+# 🌟 全新升級：0次螢光黃、>5次紅色標記函數
+def highlight_counts(val):
     try:
-        if pd.to_numeric(val) > 3: return 'background-color: #FFFF00'
-    except: pass
+        v = pd.to_numeric(val)
+        if v == 0:
+            return 'background-color: #FFFF00' # 螢光黃
+        elif v > 5:
+            return 'background-color: #FF0000; color: #FFFFFF' # 紅底白字
+    except:
+        pass
     return ''
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🧠 萬分級均分引擎啟動，徹底解除硬性天花板限制中..."):
+    with st.spinner("🧠 引擎啟動，正在產生班表與色彩視覺化分析..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
@@ -375,16 +367,20 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！已完美移除人為上限，採用「萬分級等差倍率」讓系統自帶最強天然平均能力！")
+            st.success("🎉 視覺化排班完成！核心演算法完全維持原狀，已加上『0次螢光黃』與『>5次紅色』的重點標記！")
             st.dataframe(df_result.head(10))
 
-            styled_df = df_result.style.map(highlight_b1_r, subset=['B1', 'R'] if 'B1' in df_result.columns and 'R' in df_result.columns else [])
+            # 🌟 將顏色套用到所有存在於 df_result 中的統計欄位
+            summary_cols = ['A2+B2+C2計', 'MO系計', 'R1+R3計', 'GB+GC計']
+            target_cols = [c for c in (zone_count_order + summary_cols) if c in df_result.columns]
+            
+            styled_df = df_result.style.map(highlight_counts, subset=target_cols)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 styled_df.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel 動態平衡最終版)", data=output.getvalue(), file_name="排班結果_動態平衡最終版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載最終排班表 (Excel 視覺化標記版)", data=output.getvalue(), file_name="排班結果_色彩視覺化版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
