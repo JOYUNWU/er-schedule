@@ -22,7 +22,6 @@ def get_team_priority(staff_name, df_daily):
     elif t == 'A': return 7
     else: return 8
 
-# 🌟 合算區域平均化 (A2+B2+C2, MO系, R1+R3, GB+GC 合算)
 def get_zone_count(z, m_counts, s_name):
     if z in ['A2', 'B2', 'C2']: return sum(m_counts[s_name].get(x, 0) for x in ['A2', 'B2', 'C2'])
     if z in ['MO', 'MO1', 'MO2']: return sum(m_counts[s_name].get(x, 0) for x in ['MO', 'MO1', 'MO2'])
@@ -44,15 +43,18 @@ def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
 # ==========================================
-# 🌟 AI 權重計分系統 (強化防護與階梯式溢出消化)
+# 🌟 AI 權重計分系統 (動態均分 + 階梯式溢出消化)
 # ==================================================
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled):
-    # 💡 基礎乘數 500 (確保天然平均大於一切)
-    score = get_zone_count(zone, monthly_counts, name) * 500 
+    
+    # 💡 核心變革：萬分級等差倍率！
+    # 0次=0分, 1次=10000分, 2次=20000分。
+    # 徹底移除人為寫死的上限，讓系統天然尋找次數最少的人，保證一層層均勻鋪滿！
+    score = get_zone_count(zone, monthly_counts, name) * 10000 
 
-    # 💡 絕對封殺：A組絕對不上 R2, A2, S1
+    # 💡 絕對禁區：A組絕對不上 R2, A2, S1
     if team == 'A' and zone in ['R2', 'A2', 'S1']:
-        score += 1000000 
+        score += 5000000 
 
     past_zones = []
     for i in [1, 2]: 
@@ -64,77 +66,64 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_macros = [get_macro(pz) for pz in past_zones]
     past_severe = any(is_severe(pz) for pz in past_zones)
 
-    if get_macro(zone) in past_macros: score += 50000
-    if is_severe(zone) and past_severe: score += 50000
+    # 💡 絕對防護網：跳 2 天大區與重症錯開
+    if get_macro(zone) in past_macros: score += 5000000
+    if is_severe(zone) and past_severe: score += 5000000
 
+    # 💡 大區資深資淺混排
     macro_z = get_macro(zone)
     if team in current_day_macro_teams.get(macro_z, set()):
-        score += 2000 
+        score += 20000 
 
+    # 💡 T與P的壓線進場預判防護
     if zone in ['T', 'P']:
         prev_zone = past_zones[0] if len(past_zones) > 0 else ""
         if prev_zone not in ['T', 'P']: 
             days_to_off = work_blocks[name][day_idx]
             if days_to_off not in [2, 3]: 
-                score += 50000 
+                score += 5000000 
 
-    # 💡 強制消除飢餓：0次優先拉力
-    if zone in ['B1', 'R', 'T2']:
-        if monthly_counts[name].get(zone, 0) == 0:
-            score -= 10000
-
-    # GB/GC 讓路與天花板
+    # 💡 GB/GC 的 A/B 組解任務優先權，及 D組的單次鐵規則
     if zone in ['GB', 'GC']:
         c = get_zone_count(zone, monthly_counts, name)
         if team in ['A', 'B'] and c == 0:
-            score -= 10000 
+            score -= 100000 
         elif team in ['C', 'D', 'E'] and not ab_gb_gc_fulfilled:
-            score += 5000 
+            score += 20000 
         
-        if team == 'D' and c >= 1: score += 50000
-        elif c >= 2: score += 10000
-
-    # 💡 大區強化天花板
-    if zone in ['A2', 'B2', 'C2']:
-        c = get_zone_count(zone, monthly_counts, name)
-        if c >= 4: score += 10000 
-        if c >= 5: score += 50000 
-    
-    if zone in ['MO', 'MO1', 'MO2']:
-        c = get_zone_count(zone, monthly_counts, name)
-        if c >= 3: score += 10000 
-        if c >= 4: score += 50000 
+        # D組只上一次是明確的例外規則，因此保留封殺
+        if team == 'D' and c >= 1: score += 5000000
 
     # ==========================================
-    # 🌟 階梯式消化順序 (當大家次數平手時的組別優先權)
-    # 分數扣越多，該組別越優先拿到溢出的空位
+    # 🌟 階梯式消化順序 (當大家次數平手時的溢出安插)
+    # 這裡的扣分只有數百，絕對無法超越 10000 分的「次數壁壘」
     # ==========================================
     if zone == 'B1':
-        if team == 'B': score -= 40
-        elif team == 'A': score -= 30
-        elif team == 'C': score -= 20
+        if team == 'B': score -= 400
+        elif team == 'A': score -= 300
+        elif team == 'C': score -= 200
         
     elif zone == 'C1':
-        if team == 'E': score -= 50
-        elif team == 'D': score -= 40
-        elif team == 'C': score -= 30
-        elif team == 'B': score -= 20
-        elif team == 'A': score -= 10
+        if team == 'E': score -= 500
+        elif team == 'D': score -= 400
+        elif team == 'C': score -= 300
+        elif team == 'B': score -= 200
+        elif team == 'A': score -= 100
         
     elif zone == 'R':
-        if team == 'A': score -= 40
-        elif team == 'B': score -= 30
-        elif team == 'C': score -= 20
+        if team == 'A': score -= 400
+        elif team == 'B': score -= 300
+        elif team == 'C': score -= 200
         
     elif zone == 'S':
-        if team == 'A': score -= 40
-        elif team == 'B': score -= 30
-        elif team == 'C': score -= 20
+        if team == 'A': score -= 400
+        elif team == 'B': score -= 300
+        elif team == 'C': score -= 200
         
     elif zone in ['GB', 'GC']:
-        if team == 'A': score -= 40
-        elif team == 'B': score -= 30
-        elif team == 'C': score -= 20
+        if team == 'A': score -= 400
+        elif team == 'B': score -= 300
+        elif team == 'C': score -= 200
 
     return score
 
@@ -142,7 +131,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
 # 網頁 UI 初始化
 # ==========================================
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
-st.title("🏥 急診護理人員自動排班系統 (階梯式溢出消化版)")
+st.title("🏥 急診護理人員自動排班系統 (無寫死上限·純淨均分版)")
 st.markdown("---")
 
 col1, col2 = st.columns(2)
@@ -203,7 +192,7 @@ def highlight_b1_r(val):
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🧠 載入階梯式順位消化鍊與絕對防護網中..."):
+    with st.spinner("🧠 萬分級均分引擎啟動，徹底解除硬性天花板限制中..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
@@ -220,7 +209,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         count += 1
                     work_blocks[name][day_idx] = count
 
-            # 🌟 嚴格遵守的新版 A-G 白名單
             team_allowed_zones = {
                 'A': ["L", "T", "T2", "B1", "C1", "B2", "C2", "R", "R1", "R3", "MO", "MO1", "MO2", "S2", "S", "GC", "GB", "GD"],
                 'B': ["T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
@@ -383,10 +371,11 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             df_result['A2+B2+C2計'] = df_result[['A2', 'B2', 'C2']].sum(axis=1) if all(x in df_result.columns for x in ['A2', 'B2', 'C2']) else 0
             df_result['MO系計'] = df_result[['MO', 'MO1', 'MO2']].sum(axis=1) if all(x in df_result.columns for x in ['MO', 'MO1', 'MO2']) else 0
             df_result['R1+R3計'] = df_result[['R1', 'R3']].sum(axis=1) if all(x in df_result.columns for x in ['R1', 'R3']) else 0
+            df_result['GB+GC計'] = df_result[['GB', 'GC']].sum(axis=1) if all(x in df_result.columns for x in ['GB', 'GC']) else 0
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！已完美啟動「平均為先」與「階梯式溢出順序」雙軌機制。")
+            st.success("🎉 排班完成！已完美移除人為上限，採用「萬分級等差倍率」讓系統自帶最強天然平均能力！")
             st.dataframe(df_result.head(10))
 
             styled_df = df_result.style.map(highlight_b1_r, subset=['B1', 'R'] if 'B1' in df_result.columns and 'R' in df_result.columns else [])
@@ -395,7 +384,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 styled_df.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel 階梯溢出版)", data=output.getvalue(), file_name="排班結果_階梯溢出版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載最終排班表 (Excel 動態平衡最終版)", data=output.getvalue(), file_name="排班結果_動態平衡最終版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
