@@ -171,13 +171,14 @@ n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
 # 🌟 全新升級：0次螢光黃、>5次紅色標記函數
+# 🌟 更新版本：0次螢光黃、>5次紅底黑字標記函數
 def highlight_counts(val):
     try:
         v = pd.to_numeric(val)
         if v == 0:
-            return 'background-color: #FFFF00' # 螢光黃
+            return 'background-color: #FFFF00; color: #000000' # 螢光黃底黑字
         elif v > 5:
-            return 'background-color: #FF0000; color: #FFFFFF' # 紅底白字
+            return 'background-color: #FF0000; color: #000000' # 紅底黑字 
     except:
         pass
     return ''
