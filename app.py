@@ -43,7 +43,7 @@ def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
 # ==========================================
-# 🌟 AI 權重計分系統 (動態均分 + 階梯式溢出消化)
+# 🌟 AI 權重計分系統 (動態均分 + 階梯式溢出消化) - 邏輯100%未改動！
 # ==================================================
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled):
     
@@ -84,7 +84,6 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             score += 20000 
         if team == 'D' and c >= 1: score += 5000000
 
-    # 💡 新增：A2+B2+C2 累計達 5 次，基礎分直接飆升 (絕對封殺)
     if zone in ['A2', 'B2', 'C2']:
         c = get_zone_count(zone, monthly_counts, name)
         if c >= 5:
@@ -117,7 +116,6 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         elif team == 'B': score -= 300
         elif team == 'C': score -= 200
 
-    # 💡 新增：A2+B2+C2 溢出消化順序 (D -> C -> B -> A)
     elif zone in ['A2', 'B2', 'C2']:
         if team == 'D': score -= 400
         elif team == 'C': score -= 300
@@ -183,14 +181,13 @@ n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
-# 🌟 更新版本：0次螢光黃、>5次紅底黑字標記函數
 def highlight_counts(val):
     try:
         v = pd.to_numeric(val)
         if v == 0:
-            return 'background-color: #FFFF00; color: #000000' # 螢光黃底黑字
+            return 'background-color: #FFFF00; color: #000000' 
         elif v > 5:
-            return 'background-color: #FFDAB9; color: #000000' #桃色底黑字 
+            return 'background-color: #FFDAB9; color: #000000' 
     except:
         pass
     return ''
@@ -380,10 +377,39 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 排班完成！『0次為螢光黃』、『>5次桃色』的重點標記！")
+            # ==========================================
+            # 💡 新增功能：掃描產出的班表，檢查有沒有哪一天、哪個班別沒有「L」
+            # （這段只作掃描與紀錄，絕對沒有改變排班結果）
+            # ==========================================
+            missing_l_records = []
+            for date_col in date_columns:
+                # 抓取當天的 班別 與 區域
+                shifts_today = df_shift[['姓名', date_col]].rename(columns={date_col: '班別'})
+                zones_today = df_result[['姓名', date_col]].rename(columns={date_col: '區域'})
+                merged_today = pd.merge(shifts_today, zones_today, on='姓名')
+                merged_today['班別'] = merged_today['班別'].astype(str).str.upper()
+                merged_today['區域'] = merged_today['區域'].astype(str).str.upper()
+                
+                # 分別檢查 D, E, N 班
+                for shift_type in ['D', 'E', 'N']:
+                    workers = merged_today[merged_today['班別'] == shift_type]
+                    # 如果當天該班別「有人上班」，才需要檢查有沒有 L
+                    if len(workers) > 0:
+                        if 'L' not in workers['區域'].values:
+                            missing_l_records.append({
+                                '日期 (Date)': str(date_col),
+                                '缺少組長的班別 (Shift)': f"{shift_type}班"
+                            })
+            
+            # 建立成 DataFrame 準備輸出成新分頁
+            df_missing_l = pd.DataFrame(missing_l_records)
+            if df_missing_l.empty:
+                df_missing_l = pd.DataFrame([{'檢查結果': '✅ 太棒了！本月所有上班別都有成功安排到組長(L)。'}])
+            # ==========================================
+
+            st.success("🎉 排班完成！已幫您加上『無組長警示表』分頁！")
             st.dataframe(df_result.head(10))
 
-            # 🌟 將顏色套用到所有存在於 df_result 中的統計欄位
             summary_cols = ['A2+B2+C2計', 'MO系計', 'R1+R3計', 'GB+GC計']
             target_cols = [c for c in (zone_count_order + summary_cols) if c in df_result.columns]
             
@@ -393,6 +419,9 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 styled_df.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
+                # 💡 在這裡將警示表匯出為第三個 Excel 分頁
+                df_missing_l.to_excel(writer, index=False, sheet_name='缺組長(L)警示表') 
+                
             st.download_button("📥 下載班表", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
