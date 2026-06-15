@@ -381,7 +381,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 styled_df.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-            st.download_button("📥 下載最終排班表 (Excel 視覺化標記版)", data=output.getvalue(), file_name="排班結果_色彩視覺化版.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載班表", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
