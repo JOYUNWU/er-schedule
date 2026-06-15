@@ -117,7 +117,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
 # 網頁 UI 初始化
 # ==========================================
 st.set_page_config(page_title="急診自動排班系統", layout="wide")
-st.title("🏥 急診護理人員自動排班系統 (人機協作視覺化版)")
+st.title("急診護理人員自動初步排班系統")
 st.markdown("---")
 
 col1, col2 = st.columns(2)
@@ -178,14 +178,14 @@ def highlight_counts(val):
         if v == 0:
             return 'background-color: #FFFF00; color: #000000' # 螢光黃底黑字
         elif v > 5:
-            return 'background-color: #FF0000; color: #000000' # 紅底黑字 
+            return 'background-color: #FFDAB9; color: #000000' #桃色底黑字 
     except:
         pass
     return ''
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🧠 引擎啟動，正在產生班表與色彩視覺化分析..."):
+    with st.spinner("🚀 生成中，這次一定要成功..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
@@ -368,7 +368,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
             df_result = df_result.fillna("")
 
-            st.success("🎉 視覺化排班完成！核心演算法完全維持原狀，已加上『0次螢光黃』與『>5次紅色』的重點標記！")
+            st.success("🎉 排班完成！『0次為螢光黃』、『>5次桃色』的重點標記！")
             st.dataframe(df_result.head(10))
 
             # 🌟 將顏色套用到所有存在於 df_result 中的統計欄位
