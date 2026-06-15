@@ -84,6 +84,12 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             score += 20000 
         if team == 'D' and c >= 1: score += 5000000
 
+    # 💡 新增：A2+B2+C2 累計達 5 次，基礎分直接飆升 (絕對封殺)
+    if zone in ['A2', 'B2', 'C2']:
+        c = get_zone_count(zone, monthly_counts, name)
+        if c >= 5:
+            score += 5000000
+
     if zone == 'B1':
         if team == 'B': score -= 400
         elif team == 'A': score -= 300
@@ -110,6 +116,13 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         if team == 'A': score -= 400
         elif team == 'B': score -= 300
         elif team == 'C': score -= 200
+
+    # 💡 新增：A2+B2+C2 溢出消化順序 (D -> C -> B -> A)
+    elif zone in ['A2', 'B2', 'C2']:
+        if team == 'D': score -= 400
+        elif team == 'C': score -= 300
+        elif team == 'B': score -= 200
+        elif team == 'A': score -= 100
 
     return score
 
@@ -170,7 +183,6 @@ n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
-# 🌟 全新升級：0次螢光黃、>5次紅色標記函數
 # 🌟 更新版本：0次螢光黃、>5次紅底黑字標記函數
 def highlight_counts(val):
     try:
