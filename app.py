@@ -87,12 +87,6 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             score += 20000 
         if team == 'D' and c >= 1: score += 5000000
 
-    # 💡 新增：A2+B2+C2 累計達 5 次，基礎分直接飆升 (絕對封殺)
-    if zone in ['A2', 'B2', 'C2']:
-        c = get_zone_count(zone, monthly_counts, name)
-        if c >= 5:
-            score += 5000000
-
     if zone == 'B1':
         if team == 'B': score -= 400
         elif team == 'A': score -= 300
@@ -120,7 +114,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         elif team == 'B': score -= 300
         elif team == 'C': score -= 200
 
-    # 💡 新增：A2+B2+C2 溢出消化順序 (D -> C -> B -> A)
+    # 💡 階梯式溢出權重 (A2+B2+C2)
     elif zone in ['A2', 'B2', 'C2']:
         if team == 'D': score -= 400
         elif team == 'C': score -= 300
@@ -132,7 +126,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
 # ==========================================
 # 網頁 UI 初始化
 # ==========================================
-st.set_page_config(page_title="急診自動排班系統", layout="wide")
+st.set_page_config(page_title="自動排班系統", layout="wide")
 st.title("急診護理人員自動初步排班系統")
 st.markdown("---")
 
@@ -188,11 +182,14 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🚀 引擎啟動，正在載入動態 Excel 公式與條件格式..."):
+    with st.spinner("🚀 引擎啟動，正在載入動態 Excel 公式與缺乏組長統計..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
+            
+            # 🌟 新增：用來記錄哪天哪班缺乏組長的儲存容器
+            missing_l_records = []
             
             work_blocks = {name: [0]*len(date_columns) for name in all_staff}
             for name in all_staff:
@@ -250,6 +247,14 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                                 assignments[l_cand] = "L"
                                 unassigned_staff.remove(l_cand)
                                 break
+                        
+                        # 🌟 核心防線：如果走完三個順位，該班別依然沒有組長(L)，將其記錄下來！
+                        if "L" not in assignments.values():
+                            missing_l_records.append({
+                                '日期': f"2026/06/{str(date_col).zfill(2)}",
+                                '缺乏組長的班別': f"{shift_type} 班",
+                                '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
+                            })
 
                     total_needed = len(unassigned_staff) + len(pre_assigned_zones)
                     
@@ -400,9 +405,19 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                 df_excel.at[i, 'R1+R3計'] = f'=COUNTIF({range_str}, "R1")+COUNTIF({range_str}, "R3")'
                 df_excel.at[i, 'GB+GC計'] = f'=COUNTIF({range_str}, "GB")+COUNTIF({range_str}, "GC")'
 
-            st.success("🎉 排班完成！已全面升級為「Excel 動態函數與即時條件變色」，支援你進行手動無縫微調！")
+            # 🌟 轉換缺乏組長名單成 DataFrame，若無任何記錄，則建立防走失完美提示！
+            if len(missing_l_records) == 0:
+                df_missing_l = pd.DataFrame([{
+                    '日期': '🎉 完美平衡！',
+                    '缺乏組長的班別': '全月皆有組長',
+                    '異常提示': '本月天天都有組長，無任何缺乏組長之班別，不需進行人工修改。'
+                }])
+            else:
+                df_missing_l = pd.DataFrame(missing_l_records)
+
+            st.success("🎉 排班完成！已全面復原『第三分頁：缺乏組長提示』與動梯函數！")
             
-            # 💡 修正顯示錯誤：先 head(10)，再轉 style 套用顏色
+            # 網頁預覽
             def preview_highlight(val):
                 try:
                     v = pd.to_numeric(val)
@@ -415,11 +430,12 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             target_cols = [c for c in (zone_count_order + summary_cols) if c in preview_df.columns]
             st.dataframe(preview_df.style.map(preview_highlight, subset=target_cols))
 
-            # 🌟 寫出包含真正 Excel 函數與條件格式的檔案
+            # 🌟 寫出包含真正 Excel 函數、條件格式與第三分頁的檔案
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_excel.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
+                df_missing_l.to_excel(writer, index=False, sheet_name='缺乏組長提示') # 🌟 第三分頁隆重歸位
                 
                 ws = writer.sheets['排班結果']
                 
@@ -436,7 +452,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                 ws.conditional_formatting.add(format_range, CellIsRule(operator='equal', formula=['0'], fill=yellow_fill))
                 ws.conditional_formatting.add(format_range, CellIsRule(operator='greaterThan', formula=['5'], fill=peach_fill))
 
-            st.download_button("📥 下載排班表", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載最終排班表", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
