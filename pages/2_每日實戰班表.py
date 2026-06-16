@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="每日實戰班表生成器", layout="wide")
-st.title("🖨️ 每日實戰班表產生器 (AI自動對位完美版)")
+st.set_page_config(page_title="每日班表生成器", layout="wide")
+st.title("🖨️ 每日班表產生器")
 st.markdown("---")
 
 col1, col2, col3 = st.columns(3)
 with col1: t_file = st.file_uploader("📂 1. 原始班表", type=['xlsx', 'csv'])
 with col2: r_file = st.file_uploader("📂 2. 排班結果 (含HN/PT)", type=['xlsx', 'csv'])
-with col3: a_file = st.file_uploader("📂 3. 護佐當月班表", type=['xlsx', 'csv'])
+with col3: a_file = st.file_uploader("📂 3. 護佐班表", type=['xlsx', 'csv'])
 
 def extract_grid(df):
     date_row_idx = -1
@@ -87,7 +87,7 @@ if t_file and r_file and a_file:
         ym_str = ym_t if ym_t else "本月"
         ym_str = ym_str.replace("年0", "年")
 
-        if st.button("🚀 開始轉出每日實戰班表"):
+        if st.button("🚀 開始生成每日班表"):
             
             output_cols = [f'Col_{i}' for i in range(1, 7)]
             final_rows = []
@@ -150,7 +150,7 @@ if t_file and r_file and a_file:
 
             df_final = pd.DataFrame(final_rows, columns=output_cols)
             
-            st.markdown("### 👀 每日實戰班表初步預覽")
+            st.markdown("### 👀 每日班表初步預覽")
             st.dataframe(df_final)
 
             buffer = io.BytesIO()
@@ -158,12 +158,12 @@ if t_file and r_file and a_file:
                 df_final.to_excel(writer, index=False, header=False, sheet_name='每日實戰班表')
             
             st.download_button(
-                label="📥 下載實戰班表 Excel 檔案",
+                label="📥 下載每日班表 Excel 檔案",
                 data=buffer.getvalue(),
-                file_name="每日實戰班表_完美完結版.xlsx",
+                file_name="每日班表.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("🎉 實戰班表已成功生成！日期與星期已完美加入標題！")
+            st.success("🎉 每日班表已成功生成！")
 
     except Exception as e:
         st.error(f"發生錯誤：{e}")
