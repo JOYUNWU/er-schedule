@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 import random
 import io
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill
+from openpyxl.formatting.rule import CellIsRule
 
 # ==========================================
 # 0. 頂層小幫手函數
@@ -43,7 +46,7 @@ def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
 # ==========================================
-# 🌟 AI 權重計分系統 (動態均分 + 階梯式溢出消化) - 邏輯100%未改動！
+# 🌟 AI 權重計分系統 
 # ==================================================
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled):
     
@@ -84,11 +87,6 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             score += 20000 
         if team == 'D' and c >= 1: score += 5000000
 
-    if zone in ['A2', 'B2', 'C2']:
-        c = get_zone_count(zone, monthly_counts, name)
-        if c >= 5:
-            score += 5000000
-
     if zone == 'B1':
         if team == 'B': score -= 400
         elif team == 'A': score -= 300
@@ -115,12 +113,6 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         if team == 'A': score -= 400
         elif team == 'B': score -= 300
         elif team == 'C': score -= 200
-
-    elif zone in ['A2', 'B2', 'C2']:
-        if team == 'D': score -= 400
-        elif team == 'C': score -= 300
-        elif team == 'B': score -= 200
-        elif team == 'A': score -= 100
 
     return score
 
@@ -181,20 +173,10 @@ n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
-def highlight_counts(val):
-    try:
-        v = pd.to_numeric(val)
-        if v == 0:
-            return 'background-color: #FFFF00; color: #000000' 
-        elif v > 5:
-            return 'background-color: #FFDAB9; color: #000000' 
-    except:
-        pass
-    return ''
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🚀 生成中，這次一定要成功..."):
+    with st.spinner("🚀 引擎啟動，正在載入動態 Excel 公式與條件格式..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
@@ -362,11 +344,19 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
                 progress_bar.progress((day_idx + 1) / len(date_columns))
 
+            # 插入班別總結欄位
             name_col_index = df_result.columns.get_loc('姓名')
             majority_shift_dict = {name: max(set([x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']]), key=[x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']].count) if [x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']] else "" for name in all_staff}
             df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
             
+            # 準備統計欄位順序
             zone_count_order = ["L", "L2", "T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "GB", "GC", "GD", "職代"]
+            summary_cols = ['A2+B2+C2計', 'MO系計', 'R1+R3計', 'GB+GC計']
+            
+            # 🌟 複製一份專門用來產生 Excel 的 DataFrame，確保寫入的都是公式字串
+            df_excel = df_result.copy()
+
+            # (1) 計算 df_result 的靜態數字，用來在網頁介面預覽 (Streamlit 無法直接顯示 Excel公式)
             for count_zone in zone_count_order:
                 df_result[count_zone] = df_result[date_columns].apply(lambda row: (row == count_zone).sum(), axis=1)
             
@@ -374,55 +364,70 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             df_result['MO系計'] = df_result[['MO', 'MO1', 'MO2']].sum(axis=1) if all(x in df_result.columns for x in ['MO', 'MO1', 'MO2']) else 0
             df_result['R1+R3計'] = df_result[['R1', 'R3']].sum(axis=1) if all(x in df_result.columns for x in ['R1', 'R3']) else 0
             df_result['GB+GC計'] = df_result[['GB', 'GC']].sum(axis=1) if all(x in df_result.columns for x in ['GB', 'GC']) else 0
-
             df_result = df_result.fillna("")
 
-            # ==========================================
-            # 💡 新增功能：掃描產出的班表，檢查有沒有哪一天、哪個班別沒有「L」
-            # （這段只作掃描與紀錄，絕對沒有改變排班結果）
-            # ==========================================
-            missing_l_records = []
-            for date_col in date_columns:
-                # 抓取當天的 班別 與 區域
-                shifts_today = df_shift[['姓名', date_col]].rename(columns={date_col: '班別'})
-                zones_today = df_result[['姓名', date_col]].rename(columns={date_col: '區域'})
-                merged_today = pd.merge(shifts_today, zones_today, on='姓名')
-                merged_today['班別'] = merged_today['班別'].astype(str).str.upper()
-                merged_today['區域'] = merged_today['區域'].astype(str).str.upper()
+            # (2) 替 df_excel 注入原生的 Excel 公式 (=COUNTIF)
+            first_date_col_idx = df_excel.columns.get_loc(date_columns[0]) + 1
+            last_date_col_idx = df_excel.columns.get_loc(date_columns[-1]) + 1
+            col_start = get_column_letter(first_date_col_idx)
+            col_end = get_column_letter(last_date_col_idx)
+
+            # 確保 Excel 內具備所有統計欄位
+            for col in zone_count_order + summary_cols:
+                if col not in df_excel.columns:
+                    df_excel[col] = ""
+
+            for i in range(len(df_excel)):
+                row_excel = i + 2 # Excel 行號從 1 開始，標題佔 1 行，資料從 2 開始
+                range_str = f"{col_start}{row_excel}:{col_end}{row_excel}"
                 
-                # 分別檢查 D, E, N 班
-                for shift_type in ['D', 'E', 'N']:
-                    workers = merged_today[merged_today['班別'] == shift_type]
-                    # 如果當天該班別「有人上班」，才需要檢查有沒有 L
-                    if len(workers) > 0:
-                        if 'L' not in workers['區域'].values:
-                            missing_l_records.append({
-                                '日期 (Date)': str(date_col),
-                                '缺少組長的班別 (Shift)': f"{shift_type}班"
-                            })
+                # 填入各單一區域的 COUNTIF 公式
+                for z in zone_count_order:
+                    df_excel.at[i, z] = f'=COUNTIF({range_str}, "{z}")'
+                
+                # 填入複合大區的加總公式
+                df_excel.at[i, 'A2+B2+C2計'] = f'=COUNTIF({range_str}, "A2")+COUNTIF({range_str}, "B2")+COUNTIF({range_str}, "C2")'
+                df_excel.at[i, 'MO系計'] = f'=COUNTIF({range_str}, "MO")+COUNTIF({range_str}, "MO1")+COUNTIF({range_str}, "MO2")'
+                df_excel.at[i, 'R1+R3計'] = f'=COUNTIF({range_str}, "R1")+COUNTIF({range_str}, "R3")'
+                df_excel.at[i, 'GB+GC計'] = f'=COUNTIF({range_str}, "GB")+COUNTIF({range_str}, "GC")'
+
+            st.success("🎉 排班完成！已全面升級為「Excel 動態函數與即時條件變色」，支援你進行手動無縫微調！")
             
-            # 建立成 DataFrame 準備輸出成新分頁
-            df_missing_l = pd.DataFrame(missing_l_records)
-            if df_missing_l.empty:
-                df_missing_l = pd.DataFrame([{'檢查結果': '✅ 太棒了！本月所有上班別都有成功安排到組長(L)。'}])
-            # ==========================================
+            # 在網頁上呈現靜態預覽版（我們為 0 或 >5 做簡單高亮，方便預覽）
+            def preview_highlight(val):
+                try:
+                    v = pd.to_numeric(val)
+                    if v == 0: return 'background-color: #FFFF00; color: #000000'
+                    elif v > 5: return 'background-color: #FFDAB9; color: #000000'
+                except: pass
+                return ''
+            st.dataframe(df_result.style.map(preview_highlight, subset=[c for c in (zone_count_order + summary_cols) if c in df_result.columns]).head(10))
 
-            st.success("🎉 排班完成！已幫您加上『無組長警示表』分頁！")
-            st.dataframe(df_result.head(10))
-
-            summary_cols = ['A2+B2+C2計', 'MO系計', 'R1+R3計', 'GB+GC計']
-            target_cols = [c for c in (zone_count_order + summary_cols) if c in df_result.columns]
-            
-            styled_df = df_result.style.map(highlight_counts, subset=target_cols)
-
+            # 🌟 寫出包含真正 Excel 函數與條件格式的檔案
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                styled_df.to_excel(writer, index=False, sheet_name='排班結果')
+                df_excel.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-                # 💡 在這裡將警示表匯出為第三個 Excel 分頁
-                df_missing_l.to_excel(writer, index=False, sheet_name='缺組長(L)警示表') 
                 
-            st.download_button("📥 下載班表", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                ws = writer.sheets['排班結果']
+                
+                # 取得統計欄位所在的 Excel 字母範圍 (用來上條件格式)
+                start_summary_col_idx = df_excel.columns.get_loc(zone_count_order[0]) + 1
+                end_summary_col_idx = len(df_excel.columns)
+                start_sum_col_letter = get_column_letter(start_summary_col_idx)
+                end_sum_col_letter = get_column_letter(end_summary_col_idx)
+                
+                format_range = f"{start_sum_col_letter}2:{end_sum_col_letter}{len(df_excel)+1}"
+                
+                # 定義顏色
+                yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+                peach_fill = PatternFill(start_color='FFDAB9', end_color='FFDAB9', fill_type='solid')
+                
+                # 加入 Excel 原生條件格式
+                ws.conditional_formatting.add(format_range, CellIsRule(operator='equal', formula=['0'], fill=yellow_fill))
+                ws.conditional_formatting.add(format_range, CellIsRule(operator='greaterThan', formula=['5'], fill=peach_fill))
+
+            st.download_button("📥 下載最終排班表 (Excel 動態函數無縫協作版)", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
