@@ -3,7 +3,7 @@ import pandas as pd
 import io
 
 st.set_page_config(page_title="每日班表生成器", layout="wide")
-st.title("🖨️ 每日班表產生器")
+st.title("🖨️ 每日班表生成器")
 st.markdown("---")
 
 col1, col2, col3 = st.columns(3)
@@ -155,7 +155,7 @@ if t_file and r_file and a_file:
 
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_final.to_excel(writer, index=False, header=False, sheet_name='每日實戰班表')
+                df_final.to_excel(writer, index=False, header=False, sheet_name='每日班表')
             
             st.download_button(
                 label="📥 下載每日班表 Excel 檔案",
