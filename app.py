@@ -415,7 +415,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             else:
                 df_missing_l = pd.DataFrame(missing_l_records)
 
-            st.success("🎉 排班完成！已全面復原『第三分頁：缺乏組長提示』與動梯函數！")
+            st.success("🎉 排班完成！祝福你排班順利！")
             
             # 網頁預覽
             def preview_highlight(val):
@@ -452,7 +452,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                 ws.conditional_formatting.add(format_range, CellIsRule(operator='equal', formula=['0'], fill=yellow_fill))
                 ws.conditional_formatting.add(format_range, CellIsRule(operator='greaterThan', formula=['5'], fill=peach_fill))
 
-            st.download_button("📥 下載最終排班表", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 下載排班表", data=output.getvalue(), file_name="初步自動生成排班結果.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"發生內部錯誤：{e}")
