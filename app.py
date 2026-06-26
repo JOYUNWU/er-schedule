@@ -267,19 +267,21 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         elif available_zones:
                             available_zones.pop() 
 
-                    if "N連啟倫" in unassigned_staff:
-                        valid_lian = [z for z in ['MO', 'MO1', 'MO2'] if z in available_zones]
-                        if valid_lian:
-                            valid_lian.sort(key=lambda z: monthly_counts.get("N連啟倫", {}).get(z, 0))
-                            chosen = valid_lian[0]
-                            assignments["N連啟倫"] = chosen
-                            unassigned_staff.remove("N連啟倫")
-                            available_zones.remove(chosen)
-                        else:
-                            chosen = "MO" if monthly_counts.get("N連啟倫", {}).get("MO",0) <= monthly_counts.get("N連啟倫", {}).get("MO1",0) else "MO1"
-                            assignments["N連啟倫"] = chosen
-                            unassigned_staff.remove("N連啟倫")
-                            if available_zones: available_zones.pop()
+                    # 💡 最小幅度修改：將「N連啟倫」與「N2陳信介」放入同一迴圈內統一處理
+                    for special_staff in ["N連啟倫", "N2陳信介"]:
+                        if special_staff in unassigned_staff:
+                            valid_mo_zones = [z for z in ['MO', 'MO1', 'MO2'] if z in available_zones]
+                            if valid_mo_zones:
+                                valid_mo_zones.sort(key=lambda z: monthly_counts.get(special_staff, {}).get(z, 0))
+                                chosen = valid_mo_zones[0]
+                                assignments[special_staff] = chosen
+                                unassigned_staff.remove(special_staff)
+                                available_zones.remove(chosen)
+                            else:
+                                chosen = "MO" if monthly_counts.get(special_staff, {}).get("MO",0) <= monthly_counts.get(special_staff, {}).get("MO1",0) else "MO1"
+                                assignments[special_staff] = chosen
+                                unassigned_staff.remove(special_staff)
+                                if available_zones: available_zones.pop()
 
                     continuous_reqs = []
                     for name in list(unassigned_staff):
