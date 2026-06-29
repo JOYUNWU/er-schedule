@@ -23,6 +23,7 @@ def get_team_priority(staff_name, df_daily):
     elif t == 'C': return 5
     elif t == 'B': return 6
     elif t == 'A': return 7
+    elif t == 'H': return 9 # 💡 H組為影子，優先級放最後
     else: return 8
 
 def get_zone_count(z, m_counts, s_name):
@@ -186,35 +187,32 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
 master_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S", "S2", "R3", "T2", "GB", "GC", "GD"]
 
-# 🌟 全新升級：多位未獨立新人帶飛模組
+# 🌟 革命性升級：全自動偵測 H組 並手動指定教師
 st.sidebar.markdown("---")
-st.sidebar.subheader("🌱 新人帶飛模式 (多位未獨立新人)")
-num_new_hires = st.sidebar.number_input("本月有幾位未獨立新人？", min_value=0, max_value=5, value=1 if data_ready else 0)
+st.sidebar.subheader("🌱 H組 新人臨床教師指定")
 
-new_hires_config = []
+h_team_members = []
+h_team_config = {}
+
 if data_ready:
-    for i in range(int(num_new_hires)):
-        with st.sidebar.expander(f"👤 新人 {i+1} 專屬設定", expanded=(i==0)):
-            nh_name = st.selectbox(f"選擇新人 {i+1}", ["無"] + all_staff, key=f"nh_name_{i}")
-            p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
-            p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
-            p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
-            allowed = st.multiselect(
-                f"新人 {i+1} 可安排區域", 
-                options=master_zones, 
-                default=["MO", "MO1", "MO2", "A1", "B1", "C1"],
-                key=f"allowed_{i}"
-            )
-            if nh_name != "無":
-                new_hires_config.append({
-                    "name": nh_name,
-                    "preceptors": [p for p in [p1, p2, p3] if p != "無"],
-                    "allowed_zones": allowed
-                })
+    # 💡 系統自動抓取原始檔中被標註為 'H' 的人員
+    h_team_members = df_shift[df_shift['組別'].astype(str).str.strip().str.upper() == 'H']['姓名'].unique().tolist()
+    
+    if not h_team_members:
+        st.sidebar.info("✅ 本月班表中未偵測到「H組」未獨立新人。")
+    else:
+        st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 H組 新人！")
+        for i, nh_name in enumerate(h_team_members):
+            with st.sidebar.expander(f"👤 {nh_name} 專屬教師設定", expanded=True):
+                p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
+                p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
+                p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
+                h_team_config[nh_name] = [p for p in [p1, p2, p3] if p != "無"]
+
 
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🚀 引擎啟動，正在載入動態多學員影子配對與缺乏組長統計..."):
+    with st.spinner("🚀 引擎啟動，正在載入 H組影子配對 與動態 Excel 公式..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
@@ -241,6 +239,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                 'E': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "GB", "GC"],
                 'F': ["A1", "A2", "R2", "MO", "MO1", "P", "S1"],
                 'G': ["A1", "R2", "MO", "MO1", "S1"]
+                # 💡 H組不在這裡，因為他們是影子，盲從老師去任何區域！
             }
 
             for day_idx, date_col in enumerate(date_columns):
@@ -284,10 +283,37 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                                 '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                             })
 
-                    # 🌟 核心防線：將所有設定好的未獨立新人從「當班人力分母」中抽離
-                    configured_nh_names = [cfg["name"] for cfg in new_hires_config]
-                    staff_for_quota = [n for n in unassigned_staff if n not in configured_nh_names]
-                    total_needed = len(staff_for_quota) + len(pre_assigned_zones)
+                    # 🌟 影子抽離防線：將 H組 從「當班人力分母」中無情抽離！
+                    h_shadows = {}
+                    for nh_name in h_team_members:
+                        if nh_name in unassigned_staff:
+                            active_preceptor = None
+                            
+                            # 1. 找指定的老師
+                            for p in h_team_config.get(nh_name, []):
+                                if p in unassigned_staff or p in assignments:
+                                    active_preceptor = p
+                                    break
+                            
+                            # 2. 老師休假 -> 自動抓資深學長姐臨時代班
+                            if not active_preceptor:
+                                subs = [s for s in shift_staff['姓名'].tolist() if s != nh_name and get_team_priority(s, shift_staff) <= 5 and get_team_of(s, shift_staff) != 'H' and s not in ["N連啟倫", "N2陳信介"]]
+                                if subs:
+                                    subs.sort(key=lambda x: get_team_priority(x, shift_staff))
+                                    active_preceptor = subs[0]
+                            
+                            # 若連資深都沒了(極端)，隨便抓一個非H組
+                            if not active_preceptor:
+                                subs_any = [s for s in shift_staff['姓名'].tolist() if s != nh_name and get_team_of(s, shift_staff) != 'H']
+                                if subs_any:
+                                    active_preceptor = subs_any[0]
+                                    
+                            if active_preceptor:
+                                h_shadows[nh_name] = active_preceptor
+                            
+                            unassigned_staff.remove(nh_name) # 將H組抽出配額大池！
+
+                    total_needed = len(unassigned_staff) + len(pre_assigned_zones)
                     
                     base_zones = (master_zones * 2)[:total_needed] 
                     available_zones = base_zones.copy()
@@ -298,56 +324,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         elif available_zones:
                             available_zones.pop() 
 
-                    # 🌟 處理多位未獨立新人的影子配對
-                    for nh_cfg in new_hires_config:
-                        nh_name = nh_cfg["name"]
-                        if nh_name in unassigned_staff:
-                            active_preceptor = None
-                            
-                            # 1. 尋找優先順位的老師
-                            for p in nh_cfg["preceptors"]:
-                                if p in unassigned_staff:
-                                    active_preceptor = p
-                                    break
-                            
-                            # 2. 如果老師休假或被其他新人綁走，尋找臨時代班 (非L、優先度 <=5 的資深學長姐)
-                            if not active_preceptor:
-                                subs = [s for s in unassigned_staff if s not in configured_nh_names and get_team_priority(s, shift_staff) <= 5 and s not in ["N連啟倫", "N2陳信介"]]
-                                if subs:
-                                    subs.sort(key=lambda x: get_team_priority(x, shift_staff))
-                                    active_preceptor = subs[0]
-                            
-                            # 3. 決定要連帶在哪一區 (追蹤新人昨天的區域)
-                            chosen_nh_zone = None
-                            if day_idx > 0:
-                                prev_shift = str(df_shift.loc[df_shift['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip().upper()
-                                if prev_shift != 'OFF':
-                                    prev_zone = str(df_result.loc[df_result['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip()
-                                    if prev_zone in nh_cfg["allowed_zones"] and prev_zone in available_zones:
-                                        chosen_nh_zone = prev_zone
-                            
-                            # 4. 如果不需要連帶，讓新人去沒去過的合法區域
-                            if not chosen_nh_zone:
-                                valid_nh_zones = [z for z in nh_cfg["allowed_zones"] if z in available_zones]
-                                if valid_nh_zones:
-                                    valid_nh_zones.sort(key=lambda z: monthly_counts[nh_name].get(z, 0))
-                                    chosen_nh_zone = valid_nh_zones[0]
-                                else:
-                                    chosen_nh_zone = nh_cfg["allowed_zones"][0] if nh_cfg["allowed_zones"] else "MO"
-                                    
-                            # 5. 指派新人 (不扣除區域庫存)
-                            assignments[nh_name] = chosen_nh_zone
-                            unassigned_staff.remove(nh_name)
-                            
-                            # 6. 指派老師 (需要扣除區域庫存)
-                            if active_preceptor:
-                                assignments[active_preceptor] = chosen_nh_zone
-                                unassigned_staff.remove(active_preceptor)
-                                if chosen_nh_zone in available_zones:
-                                    available_zones.remove(chosen_nh_zone)
-
-
-                    # 連啟倫與陳信介 專屬綁定機制
                     for special_staff in ["N連啟倫", "N2陳信介"]:
                         if special_staff in unassigned_staff:
                             valid_mo_zones = [z for z in ['MO', 'MO1', 'MO2'] if z in available_zones]
@@ -437,6 +413,11 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         if m_val not in current_day_macro_teams: current_day_macro_teams[m_val] = set()
                         current_day_macro_teams[m_val].add(team)
 
+                    # 🌟 將 H組 影子強制貼上老師的最終區域
+                    for nh_name, preceptor in h_shadows.items():
+                        assigned_z = assignments.get(preceptor, "MO") # 預防萬一找不到的防呆
+                        assignments[nh_name] = assigned_z
+
                     for name, assigned_zone in assignments.items():
                         df_result.loc[df_result['姓名'] == name, date_col] = assigned_zone
                         monthly_counts[name][assigned_zone] = monthly_counts[name].get(assigned_zone, 0) + 1
@@ -491,7 +472,7 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             else:
                 df_missing_l = pd.DataFrame(missing_l_records)
 
-            st.success("🎉 排班完成！已載入【多學員】影子帶飛模式，每位新人皆擁有獨立的老師與區域設定！")
+            st.success("🎉 排班完成！已載入 H組 智慧標籤化影子配對！")
             
             def preview_highlight(val):
                 try:
