@@ -87,6 +87,11 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             score += 20000 
         if team == 'D' and c >= 1: score += 5000000
 
+    if zone in ['A2', 'B2', 'C2']:
+        c = get_zone_count(zone, monthly_counts, name)
+        if c >= 5:
+            score += 5000000
+
     if zone == 'B1':
         if team == 'B': score -= 400
         elif team == 'A': score -= 300
@@ -114,7 +119,6 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         elif team == 'B': score -= 300
         elif team == 'C': score -= 200
 
-    # 💡 階梯式溢出權重 (A2+B2+C2)
     elif zone in ['A2', 'B2', 'C2']:
         if team == 'D': score -= 400
         elif team == 'C': score -= 300
@@ -180,15 +184,42 @@ n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
+master_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S", "S2", "R3", "T2", "GB", "GC", "GD"]
+
+# 🌟 全新升級：多位未獨立新人帶飛模組
+st.sidebar.markdown("---")
+st.sidebar.subheader("🌱 新人帶飛模式 (多位未獨立新人)")
+num_new_hires = st.sidebar.number_input("本月有幾位未獨立新人？", min_value=0, max_value=5, value=1 if data_ready else 0)
+
+new_hires_config = []
+if data_ready:
+    for i in range(int(num_new_hires)):
+        with st.sidebar.expander(f"👤 新人 {i+1} 專屬設定", expanded=(i==0)):
+            nh_name = st.selectbox(f"選擇新人 {i+1}", ["無"] + all_staff, key=f"nh_name_{i}")
+            p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
+            p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
+            p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
+            allowed = st.multiselect(
+                f"新人 {i+1} 可安排區域", 
+                options=master_zones, 
+                default=["MO", "MO1", "MO2", "A1", "B1", "C1"],
+                key=f"allowed_{i}"
+            )
+            if nh_name != "無":
+                new_hires_config.append({
+                    "name": nh_name,
+                    "preceptors": [p for p in [p1, p2, p3] if p != "無"],
+                    "allowed_zones": allowed
+                })
+
 st.markdown("---")
 if st.button("🚀 開始自動排班運算", disabled=not data_ready):
-    with st.spinner("🚀 引擎啟動，正在載入動態 Excel 公式與缺乏組長統計..."):
+    with st.spinner("🚀 引擎啟動，正在載入動態多學員影子配對與缺乏組長統計..."):
         try:
             df_result = df_template.copy()
             monthly_counts = {name: {} for name in all_staff}
             progress_bar = st.progress(0)
             
-            # 🌟 新增：用來記錄哪天哪班缺乏組長的儲存容器
             missing_l_records = []
             
             work_blocks = {name: [0]*len(date_columns) for name in all_staff}
@@ -211,8 +242,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                 'F': ["A1", "A2", "R2", "MO", "MO1", "P", "S1"],
                 'G': ["A1", "R2", "MO", "MO1", "S1"]
             }
-            
-            master_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S", "S2", "R3", "T2", "GB", "GC", "GD"]
 
             for day_idx, date_col in enumerate(date_columns):
                 
@@ -248,7 +277,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                                 unassigned_staff.remove(l_cand)
                                 break
                         
-                        # 🌟 核心防線：如果走完三個順位，該班別依然沒有組長(L)，將其記錄下來！
                         if "L" not in assignments.values():
                             missing_l_records.append({
                                 '日期': f"2026/06/{str(date_col).zfill(2)}",
@@ -256,7 +284,10 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                                 '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                             })
 
-                    total_needed = len(unassigned_staff) + len(pre_assigned_zones)
+                    # 🌟 核心防線：將所有設定好的未獨立新人從「當班人力分母」中抽離
+                    configured_nh_names = [cfg["name"] for cfg in new_hires_config]
+                    staff_for_quota = [n for n in unassigned_staff if n not in configured_nh_names]
+                    total_needed = len(staff_for_quota) + len(pre_assigned_zones)
                     
                     base_zones = (master_zones * 2)[:total_needed] 
                     available_zones = base_zones.copy()
@@ -267,7 +298,56 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                         elif available_zones:
                             available_zones.pop() 
 
-                    # 💡 最小幅度修改：將「N連啟倫」與「N2陳信介」放入同一迴圈內統一處理
+                    # 🌟 處理多位未獨立新人的影子配對
+                    for nh_cfg in new_hires_config:
+                        nh_name = nh_cfg["name"]
+                        if nh_name in unassigned_staff:
+                            active_preceptor = None
+                            
+                            # 1. 尋找優先順位的老師
+                            for p in nh_cfg["preceptors"]:
+                                if p in unassigned_staff:
+                                    active_preceptor = p
+                                    break
+                            
+                            # 2. 如果老師休假或被其他新人綁走，尋找臨時代班 (非L、優先度 <=5 的資深學長姐)
+                            if not active_preceptor:
+                                subs = [s for s in unassigned_staff if s not in configured_nh_names and get_team_priority(s, shift_staff) <= 5 and s not in ["N連啟倫", "N2陳信介"]]
+                                if subs:
+                                    subs.sort(key=lambda x: get_team_priority(x, shift_staff))
+                                    active_preceptor = subs[0]
+                            
+                            # 3. 決定要連帶在哪一區 (追蹤新人昨天的區域)
+                            chosen_nh_zone = None
+                            if day_idx > 0:
+                                prev_shift = str(df_shift.loc[df_shift['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip().upper()
+                                if prev_shift != 'OFF':
+                                    prev_zone = str(df_result.loc[df_result['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip()
+                                    if prev_zone in nh_cfg["allowed_zones"] and prev_zone in available_zones:
+                                        chosen_nh_zone = prev_zone
+                            
+                            # 4. 如果不需要連帶，讓新人去沒去過的合法區域
+                            if not chosen_nh_zone:
+                                valid_nh_zones = [z for z in nh_cfg["allowed_zones"] if z in available_zones]
+                                if valid_nh_zones:
+                                    valid_nh_zones.sort(key=lambda z: monthly_counts[nh_name].get(z, 0))
+                                    chosen_nh_zone = valid_nh_zones[0]
+                                else:
+                                    chosen_nh_zone = nh_cfg["allowed_zones"][0] if nh_cfg["allowed_zones"] else "MO"
+                                    
+                            # 5. 指派新人 (不扣除區域庫存)
+                            assignments[nh_name] = chosen_nh_zone
+                            unassigned_staff.remove(nh_name)
+                            
+                            # 6. 指派老師 (需要扣除區域庫存)
+                            if active_preceptor:
+                                assignments[active_preceptor] = chosen_nh_zone
+                                unassigned_staff.remove(active_preceptor)
+                                if chosen_nh_zone in available_zones:
+                                    available_zones.remove(chosen_nh_zone)
+
+
+                    # 連啟倫與陳信介 專屬綁定機制
                     for special_staff in ["N連啟倫", "N2陳信介"]:
                         if special_staff in unassigned_staff:
                             valid_mo_zones = [z for z in ['MO', 'MO1', 'MO2'] if z in available_zones]
@@ -363,19 +443,15 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
 
                 progress_bar.progress((day_idx + 1) / len(date_columns))
 
-            # 插入班別總結欄位
             name_col_index = df_result.columns.get_loc('姓名')
             majority_shift_dict = {name: max(set([x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']]), key=[x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']].count) if [x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']] else "" for name in all_staff}
             df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
             
-            # 準備統計欄位順序
             zone_count_order = ["L", "L2", "T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "GB", "GC", "GD", "職代"]
             summary_cols = ['A2+B2+C2計', 'MO系計', 'R1+R3計', 'GB+GC計']
             
-            # 🌟 複製一份專門用來產生 Excel 的 DataFrame
             df_excel = df_result.copy()
 
-            # (1) 計算 df_result 的靜態數字，用來在網頁介面預覽
             for count_zone in zone_count_order:
                 df_result[count_zone] = df_result[date_columns].apply(lambda row: (row == count_zone).sum(), axis=1)
             
@@ -385,7 +461,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             df_result['GB+GC計'] = df_result[['GB', 'GC']].sum(axis=1) if all(x in df_result.columns for x in ['GB', 'GC']) else 0
             df_result = df_result.fillna("")
 
-            # (2) 替 df_excel 注入原生的 Excel 公式 (=COUNTIF)
             first_date_col_idx = df_excel.columns.get_loc(date_columns[0]) + 1
             last_date_col_idx = df_excel.columns.get_loc(date_columns[-1]) + 1
             col_start = get_column_letter(first_date_col_idx)
@@ -407,7 +482,6 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
                 df_excel.at[i, 'R1+R3計'] = f'=COUNTIF({range_str}, "R1")+COUNTIF({range_str}, "R3")'
                 df_excel.at[i, 'GB+GC計'] = f'=COUNTIF({range_str}, "GB")+COUNTIF({range_str}, "GC")'
 
-            # 🌟 轉換缺乏組長名單成 DataFrame，若無任何記錄，則建立防走失完美提示！
             if len(missing_l_records) == 0:
                 df_missing_l = pd.DataFrame([{
                     '日期': '🎉 完美平衡！',
@@ -417,9 +491,8 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             else:
                 df_missing_l = pd.DataFrame(missing_l_records)
 
-            st.success("🎉 排班完成！祝福你排班順利！")
+            st.success("🎉 排班完成！已載入【多學員】影子帶飛模式，每位新人皆擁有獨立的老師與區域設定！")
             
-            # 網頁預覽
             def preview_highlight(val):
                 try:
                     v = pd.to_numeric(val)
@@ -432,12 +505,11 @@ if st.button("🚀 開始自動排班運算", disabled=not data_ready):
             target_cols = [c for c in (zone_count_order + summary_cols) if c in preview_df.columns]
             st.dataframe(preview_df.style.map(preview_highlight, subset=target_cols))
 
-            # 🌟 寫出包含真正 Excel 函數、條件格式與第三分頁的檔案
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df_excel.to_excel(writer, index=False, sheet_name='排班結果')
                 df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-                df_missing_l.to_excel(writer, index=False, sheet_name='缺乏組長提示') # 🌟 第三分頁隆重歸位
+                df_missing_l.to_excel(writer, index=False, sheet_name='缺乏組長提示') 
                 
                 ws = writer.sheets['排班結果']
                 
