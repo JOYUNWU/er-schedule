@@ -201,7 +201,7 @@ if data_ready:
     else:
         st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 H組 新人！")
         for i, nh_name in enumerate(h_team_members):
-            with st.sidebar.expander(f"👤 {nh_name} 專屬設定", expanded=True):
+            with st.sidebar.expander(f"👤 {nh_name} 設定", expanded=True):
                 p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
                 p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
                 p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
