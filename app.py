@@ -60,7 +60,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     for i in [1, 2]: 
         if day_idx - i >= 0:
             pz = str(df_result.loc[df_result['姓名'] == name, date_columns[day_idx - i]].values[0]).strip()
-            if pz not in ['OFF', '', 'X', 'NAN', 'L', 'L2', '職代', 'None']:
+            if pz not in ['OFF', '', 'X', 'NAN', 'L', 'L2', '職代', 'None', '⚠️需指派老師']:
                 past_zones.append(pz)
 
     past_macros = [get_macro(pz) for pz in past_zones]
@@ -201,12 +201,11 @@ if data_ready:
     else:
         st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 H組 新人！")
         for i, nh_name in enumerate(h_team_members):
-            with st.sidebar.expander(f"👤 {nh_name} 設定", expanded=True):
+            with st.sidebar.expander(f"👤 {nh_name} 專屬設定", expanded=True):
                 p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
                 p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
                 p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
                 
-                # 💡 新增：允許指定的區域清單
                 allowed = st.multiselect(
                     f"可安排區域 (放假後換區用)", 
                     options=master_zones, 
@@ -310,79 +309,71 @@ with main_col:
                             if "L" not in assignments.values():
                                 missing_l_records.append({
                                     '日期': f"2026/06/{str(date_col).zfill(2)}",
-                                    '缺乏組長的班別': f"{shift_type} 班",
+                                    '對象班別': f"👑 {shift_type} 班 組長",
                                     '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                                 })
 
-                        # 🌟 計算常規扣除 H組 後需要的總配額
-                        staff_for_quota = [n for n in unassigned_staff if get_team_of(n, shift_staff) != 'H']
-                        total_needed = len(staff_for_quota) + len(pre_assigned_zones)
-                        
-                        base_zones = (master_zones * 2)[:total_needed] 
-                        available_zones = base_zones.copy()
-                        
-                        for pz in pre_assigned_zones:
-                            if pz in available_zones:
-                                available_zones.remove(pz)
-                            elif available_zones:
-                                available_zones.pop() 
-
-                        # 🌟 影子連續帶飛防線：將 H組 從「當班人力分母」中無情抽離，並綁定連續區域！
+                        # 🌟 處理 H組 影子人力的連續性
                         for nh_name in h_team_members:
                             if nh_name in unassigned_staff:
                                 active_preceptor = None
                                 
-                                # 1. 找指定的老師 (必須還沒被分配，不能是 L 或預排)
+                                # 1. 尋找指定的臨床教師
                                 for p in h_team_config.get(nh_name, {}).get("preceptors", []):
                                     if p in unassigned_staff:
                                         active_preceptor = p
                                         break
                                 
-                                # 2. 老師休假 -> 自動抓資深學長姐臨時代班
-                                if not active_preceptor:
-                                    subs = [s for s in unassigned_staff if s != nh_name and get_team_priority(s, shift_staff) <= 5 and get_team_of(s, shift_staff) != 'H' and s not in ["N連啟倫", "N2陳信介"]]
-                                    if subs:
-                                        subs.sort(key=lambda x: get_team_priority(x, shift_staff))
-                                        active_preceptor = subs[0]
-                                
-                                if not active_preceptor:
-                                    subs_any = [s for s in unassigned_staff if s != nh_name and get_team_of(s, shift_staff) != 'H']
-                                    if subs_any:
-                                        active_preceptor = subs_any[0]
-
-                                # 3. 決定要連帶在哪一區 (追蹤新人昨天的區域，確保兩個 OFF 之間區域相同)
-                                chosen_nh_zone = None
-                                allowed_zones = h_team_config.get(nh_name, {}).get("allowed_zones", master_zones)
-                                
-                                if day_idx > 0:
-                                    prev_shift = str(df_shift.loc[df_shift['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip().upper()
-                                    if prev_shift != 'OFF':
-                                        prev_zone = str(df_result.loc[df_result['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip()
-                                        if prev_zone not in ['OFF', 'L', 'L2', 'X', 'NAN', '']:
-                                            chosen_nh_zone = prev_zone # 強制延續昨天的區域
-                                
-                                # 4. 若不需要延續 (剛放完 OFF 或是第一天)，從允許清單中挑選
-                                if not chosen_nh_zone:
-                                    valid_nh_zones = [z for z in allowed_zones if z in available_zones]
-                                    if valid_nh_zones:
-                                        valid_nh_zones.sort(key=lambda z: monthly_counts[nh_name].get(z, 0))
-                                        chosen_nh_zone = valid_nh_zones[0]
-                                    else:
-                                        # 若允許的區域剛好今天沒開，強迫開一個允許的區域給他
-                                        chosen_nh_zone = allowed_zones[0] if allowed_zones else "MO"
-
-                                # 5. 指派新人 (不扣除可用區域庫存，因為他是影子)
-                                assignments[nh_name] = chosen_nh_zone
-                                unassigned_staff.remove(nh_name)
-                                
-                                # 6. 指派老師 (需要扣除可用區域庫存，因為他是實質人力)
+                                # 2. 如果今天有找到老師，執行影子帶飛與區塊連續性邏輯
                                 if active_preceptor:
+                                    chosen_nh_zone = None
+                                    allowed_zones = h_team_config.get(nh_name, {}).get("allowed_zones", master_zones)
+                                    
+                                    # 3. 確保兩個 OFF 之間都是相同工作區域
+                                    if day_idx > 0:
+                                        prev_shift = str(df_shift.loc[df_shift['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip().upper()
+                                        if prev_shift != 'OFF':
+                                            prev_zone = str(df_result.loc[df_result['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip()
+                                            if prev_zone not in ['OFF', 'L', 'L2', 'X', 'NAN', '', '⚠️需指派老師']:
+                                                chosen_nh_zone = prev_zone # 完美連續：強制延續昨天的區域
+                                    
+                                    # 4. 若剛放完假回來第一天上班，從網頁勾選的允許區域中挑選一個目前有開出的坑位
+                                    if not chosen_nh_zone:
+                                        valid_nh_zones = [z for z in allowed_zones if z in available_zones]
+                                        if valid_nh_zones:
+                                            valid_nh_zones.sort(key=lambda z: monthly_counts[nh_name].get(z, 0))
+                                            chosen_nh_zone = valid_nh_zones[0]
+                                        else:
+                                            chosen_nh_zone = allowed_zones[0] if allowed_zones else "MO"
+
+                                    # 5. 分配給新人與老師，並扣除配額庫存
+                                    assignments[nh_name] = chosen_nh_zone
+                                    unassigned_staff.remove(nh_name)
+                                    
                                     assignments[active_preceptor] = chosen_nh_zone
                                     unassigned_staff.remove(active_preceptor)
+                                    
                                     if chosen_nh_zone in available_zones:
                                         available_zones.remove(chosen_nh_zone)
                                     elif available_zones:
-                                        available_zones.pop() # 隨便棄置一個區域，維持總量平衡
+                                        available_zones.pop()
+                                
+                                # 💡 核心優化：如果指定的三位老師今天都休假，不進行隨機強制分配！
+                                else:
+                                    missing_l_records.append({
+                                        '日期': f"2026/06/{str(date_col).zfill(2)}",
+                                        '對象班別': f"🌱 新人 {nh_name} ({shift_type}班)",
+                                        '異常提示': "⚠️ 設定的專屬教師今天皆未上班（或已去當班別組長），缺乏臨床教師，請人工手動指派"
+                                    })
+                                    assignments[nh_name] = "⚠️需指派老師" # 於儲存格內留下醒目的代辦標記
+                                    unassigned_staff.remove(nh_name) # 同樣抽出分母，不影響一般人排班
+
+                        # 抽離非H組後，計算常規人力的可用區域
+                        staff_for_quota = [n for n in unassigned_staff if get_team_of(n, shift_staff) != 'H']
+                        total_needed = len(staff_for_quota) + len(pre_assigned_zones)
+                        
+                        base_zones = (master_zones * 2)[:total_needed] 
+                        available_zones = [z for z in base_zones if z in available_zones]
 
                         for special_staff in ["N連啟倫", "N2陳信介"]:
                             if special_staff in unassigned_staff:
@@ -518,16 +509,17 @@ with main_col:
                     df_excel.at[i, 'R1+R3計'] = f'=COUNTIF({range_str}, "R1")+COUNTIF({range_str}, "R3")'
                     df_excel.at[i, 'GB+GC計'] = f'=COUNTIF({range_str}, "GB")+COUNTIF({range_str}, "GC")'
 
+                # 🌟 轉換缺乏組長與教師提示名單
                 if len(missing_l_records) == 0:
                     df_missing_l = pd.DataFrame([{
                         '日期': '🎉 完美平衡！',
-                        '缺乏組長的班別': '全月皆有組長',
-                        '異常提示': '本月天天都有組長，無任何缺乏組長之班別，不需進行人工修改。'
+                        '對象班別': '全月皆無異常',
+                        '異常提示': '本月天天都有組長與臨床教師，無任何缺乏提示，不需進行人工修改。'
                     }])
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！已載入 H組 【指定區域限制】與【強制區塊連續】的完美防線！")
+                st.success("🎉 排班完成！已載入 H組 智慧區域指定、區塊連續與缺乏臨床教師提示功能！")
                 
                 def preview_highlight(val):
                     try:
@@ -545,7 +537,7 @@ with main_col:
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     df_excel.to_excel(writer, index=False, sheet_name='排班結果')
                     df_shift.to_excel(writer, index=False, sheet_name='原始班表')
-                    df_missing_l.to_excel(writer, index=False, sheet_name='缺乏組長提示') 
+                    df_missing_l.to_excel(writer, index=False, sheet_name='缺乏組長與教師提示') # 🌟 第三分頁正式升級
                     
                     ws = writer.sheets['排班結果']
                     
