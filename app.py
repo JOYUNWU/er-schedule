@@ -126,6 +126,8 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         elif team == 'B': score -= 200
         elif team == 'A': score -= 100
 
+    # 💡 註解：上一版加在這邊的 -3000000 分已被移除，改用下方更強大的「預先卡位派位」防線！
+
     return score
 
 # ==========================================
@@ -174,7 +176,7 @@ train_t = st.sidebar.multiselect("檢傷(T) 訓練名單", options=all_staff if 
 
 leader_options = ["請點選"] + all_staff if data_ready else ["請點選"]
 
-st.sidebar.subheader("各班組長順位")
+st.sidebar.subheader("👑 各班組長順位")
 d_l_1 = st.sidebar.selectbox("D班 第一順位", leader_options)
 d_l_2 = st.sidebar.selectbox("D班 第二順位", leader_options)
 d_l_3 = st.sidebar.selectbox("D班 第三順位", leader_options)
@@ -185,7 +187,7 @@ n_l_1 = st.sidebar.selectbox("N班 第一順位", leader_options)
 n_l_2 = st.sidebar.selectbox("N班 第二順位", leader_options)
 n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 
-master_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "S", "S2", "R3", "T2", "GB", "GC", "GD"]
+master_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R3", "R2", "P", "MO", "MO1", "MO2", "S1", "S", "S2", "R1", "T2", "GB", "GC", "GD"]
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🌱 H組 新人臨床教師與區域指定")
@@ -201,7 +203,7 @@ if data_ready:
     else:
         st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 H組 新人！")
         for i, nh_name in enumerate(h_team_members):
-            with st.sidebar.expander(f"👤 {nh_name} 教師設定", expanded=True):
+            with st.sidebar.expander(f"👤 {nh_name} 專屬設定", expanded=True):
                 p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
                 p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
                 p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
@@ -223,7 +225,7 @@ st.markdown("---")
 main_col, help_col = st.columns([7.5, 2.5])
 
 with help_col:
-    st.markdown("### 💡常見錯誤排除指南")
+    st.markdown("### 💡 常見錯誤排除指南")
     st.info("""
     如果你按下排班按鈕後發生 **紅色錯誤 (Error)** 或跑不出結果，請檢查以下 4 點：
 
@@ -243,7 +245,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動，希望你能趕快排完班，加油！！..."):
+        with st.spinner("🚀 引擎啟動，正在計算常規防撞庫存 與 主力護盤預派..."):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
@@ -297,7 +299,6 @@ with main_col:
                             if preset not in ['X', 'NAN', 'NONE', ''] and name in unassigned_staff:
                                 assignments[name] = preset
                                 unassigned_staff.remove(name)
-                                # 💡 只有當預排的不是行政休假等代號時，才視為消耗常規臨床區域
                                 if preset not in ['OFF', 'L', 'L2', '職代']:
                                     pre_assigned_zones.append(preset)
                         
@@ -317,33 +318,29 @@ with main_col:
                                     '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                                 })
 
-                        # 🌟 3. 重大修復：精準計算常規區域庫存，並拔除預排佔用的名額！
-                        # (H組不納入常規人力計算)
+                        # 3. 精準計算常規區域庫存
                         staff_for_quota = [n for n in unassigned_staff if get_team_of(n, shift_staff) != 'H']
                         total_needed = len(staff_for_quota) + len(pre_assigned_zones)
                         
                         base_zones = (master_zones * 2)[:total_needed] 
                         available_zones = base_zones.copy()
                         
-                        # 💡 完美拔除預排區域，防撞機制正式歸位！
                         for pz in pre_assigned_zones:
                             if pz in available_zones:
                                 available_zones.remove(pz)
                             elif available_zones:
                                 available_zones.pop()
 
-                        # 🌟 4. H組 影子配對進場 (無條件跟隨老師)
+                        # 4. H組 影子配對進場 (無條件跟隨老師)
                         for nh_name in h_team_members:
                             if nh_name in unassigned_staff:
                                 active_preceptor = None
                                 
-                                # 找指定的老師
                                 for p in h_team_config.get(nh_name, {}).get("preceptors", []):
                                     if p in unassigned_staff:
                                         active_preceptor = p
                                         break
                                 
-                                # 老師休假 -> 自動抓資深學長姐臨時代班
                                 if not active_preceptor:
                                     subs = [s for s in unassigned_staff if s != nh_name and get_team_priority(s, shift_staff) <= 5 and get_team_of(s, shift_staff) != 'H' and s not in ["N連啟倫", "N2陳信介"]]
                                     if subs:
@@ -359,7 +356,6 @@ with main_col:
                                     chosen_nh_zone = None
                                     allowed_zones = h_team_config.get(nh_name, {}).get("allowed_zones", master_zones)
                                     
-                                    # 確保留區連續性
                                     if day_idx > 0:
                                         prev_shift = str(df_shift.loc[df_shift['姓名'] == nh_name, date_columns[day_idx - 1]].values[0]).strip().upper()
                                         if prev_shift != 'OFF':
@@ -367,7 +363,6 @@ with main_col:
                                             if prev_zone not in ['OFF', 'L', 'L2', 'X', 'NAN', '', '⚠️需指派老師']:
                                                 chosen_nh_zone = prev_zone 
                                     
-                                    # 若無連帶需求，合法選區
                                     if not chosen_nh_zone:
                                         valid_nh_zones = [z for z in allowed_zones if z in available_zones]
                                         if valid_nh_zones:
@@ -376,20 +371,17 @@ with main_col:
                                         else:
                                             chosen_nh_zone = allowed_zones[0] if allowed_zones else "MO"
 
-                                    # 綁定分配
                                     assignments[nh_name] = chosen_nh_zone
-                                    unassigned_staff.remove(nh_name) # H是影子，不扣庫存
+                                    unassigned_staff.remove(nh_name) 
                                     
                                     assignments[active_preceptor] = chosen_nh_zone
                                     unassigned_staff.remove(active_preceptor)
                                     
-                                    # 老師是常規人力，必須從 available_zones 扣除一個坑位
                                     if chosen_nh_zone in available_zones:
                                         available_zones.remove(chosen_nh_zone)
                                     elif available_zones:
                                         available_zones.pop()
                                 
-                                # 💡 缺老師視覺警報
                                 else:
                                     missing_l_records.append({
                                         '日期': f"2026/06/{str(date_col).zfill(2)}",
@@ -455,7 +447,60 @@ with main_col:
                                 unassigned_staff.remove(name)
                                 available_zones.remove(v_zones[0])
                         
-                        # 8. 大區防撞計分啟動
+                        # ==============================================================
+                        # 🌟 8. 主力護盤預先派位 (保障三大作戰區 1位A 或 2位B)
+                        # 這段邏輯「搶在」菜鳥 G組 挑選坑位之前，強制先把 A/B 塞進這三區
+                        # ==============================================================
+                        macro_target_zones = {
+                            'MED': ['A1', 'B1', 'C1', 'A2', 'B2', 'C2'],
+                            'SURG': ['S', 'S1', 'S2'],
+                            'RESUS': ['R', 'R1', 'R2', 'R3']
+                        }
+                        
+                        for macro, z_list in macro_target_zones.items():
+                            a_count = sum(1 for n, z in assignments.items() if get_team_of(n, shift_staff) == 'A' and z in z_list)
+                            b_count = sum(1 for n, z in assignments.items() if get_team_of(n, shift_staff) == 'B' and z in z_list)
+                            
+                            if a_count >= 1: continue # 安全：已有一位 A 組，放行！
+                                
+                            avail_A = [n for n in unassigned_staff if get_team_of(n, shift_staff) == 'A']
+                            if avail_A:
+                                chosen_a = avail_A[0]
+                                valid_mz = [z for z in z_list if z in available_zones]
+                                # 排除A組黑名單
+                                valid_mz = [z for z in valid_mz if z not in ['R2', 'A2', 'S1']]
+                                gender_a = shift_staff[shift_staff['姓名'] == chosen_a]['性別'].values[0] if len(shift_staff[shift_staff['姓名'] == chosen_a]) > 0 else ""
+                                valid_mz = [z for z in valid_mz if not (z == "S2" and str(gender_a).upper() == "M")]
+                                
+                                if valid_mz:
+                                    valid_mz.sort(key=lambda z: monthly_counts[chosen_a].get(z, 0))
+                                    chosen_z = valid_mz[0]
+                                    assignments[chosen_a] = chosen_z
+                                    unassigned_staff.remove(chosen_a)
+                                    available_zones.remove(chosen_z)
+                                    continue # 成功補上 1 位 A 組，放行！
+
+                            # 若無 A 組，啟動降級備援：強迫派 2 位 B 組進駐！
+                            while b_count < 2:
+                                avail_B = [n for n in unassigned_staff if get_team_of(n, shift_staff) == 'B']
+                                if not avail_B: break # B 組不夠用了
+                                
+                                chosen_b = avail_B[0]
+                                valid_mz = [z for z in z_list if z in available_zones]
+                                gender_b = shift_staff[shift_staff['姓名'] == chosen_b]['性別'].values[0] if len(shift_staff[shift_staff['姓名'] == chosen_b]) > 0 else ""
+                                valid_mz = [z for z in valid_mz if not (z == "S2" and str(gender_b).upper() == "M")]
+                                
+                                if not valid_mz: break # 大區客滿了
+                                    
+                                valid_mz.sort(key=lambda z: monthly_counts[chosen_b].get(z, 0))
+                                chosen_z = valid_mz[0]
+                                assignments[chosen_b] = chosen_z
+                                unassigned_staff.remove(chosen_b)
+                                available_zones.remove(chosen_z)
+                                b_count += 1
+                        # ==============================================================
+
+                        # 9. 剩餘人員常規發牌 (貪婪分配)
                         current_day_macro_teams = {}
                         for assigned_name, assigned_z in assignments.items():
                             t_val = get_team_of(assigned_name, shift_staff)
@@ -466,7 +511,6 @@ with main_col:
                         random.shuffle(unassigned_staff)
                         unassigned_staff.sort(key=lambda x: get_team_priority(x, shift_staff))
 
-                        # 9. 剩餘人員常規發牌
                         for name in list(unassigned_staff):
                             gender = shift_staff[shift_staff['姓名'] == name]['性別'].values[0] if len(shift_staff[shift_staff['姓名'] == name]) > 0 else ""
                             team = get_team_of(name, shift_staff)
@@ -547,7 +591,7 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！已完美修復常規區域庫存扣除邏輯，不再發生撞區！")
+                st.success("🎉 排班完成！祝你順利！")
                 
                 def preview_highlight(val):
                     try:
