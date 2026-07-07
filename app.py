@@ -16,14 +16,13 @@ def get_team_of(staff_name, df_daily):
 
 def get_team_priority(staff_name, df_daily):
     t = get_team_of(staff_name, df_daily)
-    if t == 'G': return 1
-    elif t == 'F': return 2
+    if t == 'F': return 2         # (把原本 if t == 'G': return 1 刪掉)
     elif t == 'E': return 3
     elif t == 'D': return 4
     elif t == 'C': return 5
     elif t == 'B': return 6
     elif t == 'A': return 7
-    elif t == 'H': return 9 # 💡 H組為影子，優先級放最後
+    elif t == 'G': return 9 # 💡 改為 G 組為透明人影子，優先級放最後
     else: return 8
 
 def get_zone_count(z, m_counts, s_name):
@@ -49,7 +48,8 @@ def is_severe(zone):
 # ==========================================
 # 🌟 AI 權重計分系統 
 # ==================================================
-def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled):
+# 💡 提示：在此處新增了 t_novices_today 參數，用來判斷當班是否還有沒上過 T 的人
+def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled, t_novices_today):
     
     score = get_zone_count(zone, monthly_counts, name) * 10000 
 
@@ -79,6 +79,13 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
             days_to_off = work_blocks[name][day_idx]
             if days_to_off not in [2, 3]: 
                 score += 5000000 
+
+    # 💡 【新增】T區二刷讓位機制：當月只安排一個段落的T
+    if zone == 'T':
+        # 如果這個人這個月已經上過T (因為如果是連上，根本不會進到這個函數，所以來到這代表要開新段落)
+        # 且 當班還有「其他人」有資格上 T 但次數為 0
+        if monthly_counts[name].get('T', 0) > 0 and any(x != name for x in t_novices_today):
+            score += 5000000 # 強制加上 500 萬分懲罰，把位子讓給還沒上過的人！
 
     if zone in ['GB', 'GC']:
         c = get_zone_count(zone, monthly_counts, name)
@@ -125,8 +132,6 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
         elif team == 'C': score -= 300
         elif team == 'B': score -= 200
         elif team == 'A': score -= 100
-
-    # 💡 註解：上一版加在這邊的 -3000000 分已被移除，改用下方更強大的「預先卡位派位」防線！
 
     return score
 
@@ -190,18 +195,18 @@ n_l_3 = st.sidebar.selectbox("N班 第三順位", leader_options)
 master_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R3", "R2", "P", "MO", "MO1", "MO2", "S1", "S", "S2", "R1", "T2", "GB", "GC", "GD"]
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🌱 H組 新人臨床教師與區域指定")
+st.sidebar.subheader("🌱 G組 新人臨床教師與區域指定")
 
 h_team_members = []
 h_team_config = {}
 
 if data_ready:
-    h_team_members = df_shift[df_shift['組別'].astype(str).str.strip().str.upper() == 'H']['姓名'].unique().tolist()
+    h_team_members = df_shift[df_shift['組別'].astype(str).str.strip().str.upper() == 'G']['姓名'].unique().tolist()
     
     if not h_team_members:
-        st.sidebar.info("✅ 本月班表中未偵測到「H組」未獨立新人。")
+        st.sidebar.info("✅ 本月班表中未偵測到「G組」未獨立新人。")
     else:
-        st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 H組 新人！")
+        st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 G組 新人！")
         for i, nh_name in enumerate(h_team_members):
             with st.sidebar.expander(f"👤 {nh_name} 專屬設定", expanded=True):
                 p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
@@ -264,11 +269,12 @@ with main_col:
                             count += 1
                         work_blocks[name][day_idx] = count
 
+                # 💡 【更新】依照您的最新規則，替換了各組別的開放區域！(移除D組B1, 移除B組重複T2)
                 team_allowed_zones = {
                     'A': ["L", "T", "T2", "B1", "C1", "B2", "C2", "R", "R1", "R3", "MO", "MO1", "MO2", "S2", "S", "GC", "GB", "GD"],
-                    'B': ["T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
+                    'B': ["T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
                     'C': ["A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
-                    'D': ["A1", "B1", "C1", "A2", "B2", "C2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
+                    'D': ["A1", "C1", "A2", "B2", "C2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
                     'E': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "GB", "GC"],
                     'F': ["A1", "A2", "R2", "MO", "MO1", "P", "S1"],
                     'G': ["A1", "R2", "MO", "MO1", "S1"]
@@ -319,7 +325,7 @@ with main_col:
                                 })
 
                         # 3. 精準計算常規區域庫存
-                        staff_for_quota = [n for n in unassigned_staff if get_team_of(n, shift_staff) != 'H']
+                        staff_for_quota = [n for n in unassigned_staff if get_team_of(n, shift_staff) != 'G']
                         total_needed = len(staff_for_quota) + len(pre_assigned_zones)
                         
                         base_zones = (master_zones * 2)[:total_needed] 
@@ -342,13 +348,13 @@ with main_col:
                                         break
                                 
                                 if not active_preceptor:
-                                    subs = [s for s in unassigned_staff if s != nh_name and get_team_priority(s, shift_staff) <= 5 and get_team_of(s, shift_staff) != 'H' and s not in ["N連啟倫", "N2陳信介"]]
+                                    subs = [s for s in unassigned_staff if s != nh_name and get_team_priority(s, shift_staff) <= 5 and get_team_of(s, shift_staff) != 'G' and s not in ["N連啟倫", "N2陳信介"]]
                                     if subs:
                                         subs.sort(key=lambda x: get_team_priority(x, shift_staff))
                                         active_preceptor = subs[0]
                                 
                                 if not active_preceptor:
-                                    subs_any = [s for s in unassigned_staff if s != nh_name and get_team_of(s, shift_staff) != 'H']
+                                    subs_any = [s for s in unassigned_staff if s != nh_name and get_team_of(s, shift_staff) != 'G']
                                     if subs_any:
                                         active_preceptor = subs_any[0]
 
@@ -449,7 +455,6 @@ with main_col:
                         
                         # ==============================================================
                         # 🌟 8. 主力護盤預先派位 (保障三大作戰區 1位A 或 2位B)
-                        # 這段邏輯「搶在」菜鳥 G組 挑選坑位之前，強制先把 A/B 塞進這三區
                         # ==============================================================
                         macro_target_zones = {
                             'MED': ['A1', 'B1', 'C1', 'A2', 'B2', 'C2'],
@@ -461,13 +466,12 @@ with main_col:
                             a_count = sum(1 for n, z in assignments.items() if get_team_of(n, shift_staff) == 'A' and z in z_list)
                             b_count = sum(1 for n, z in assignments.items() if get_team_of(n, shift_staff) == 'B' and z in z_list)
                             
-                            if a_count >= 1: continue # 安全：已有一位 A 組，放行！
+                            if a_count >= 1: continue 
                                 
                             avail_A = [n for n in unassigned_staff if get_team_of(n, shift_staff) == 'A']
                             if avail_A:
                                 chosen_a = avail_A[0]
                                 valid_mz = [z for z in z_list if z in available_zones]
-                                # 排除A組黑名單
                                 valid_mz = [z for z in valid_mz if z not in ['R2', 'A2', 'S1']]
                                 gender_a = shift_staff[shift_staff['姓名'] == chosen_a]['性別'].values[0] if len(shift_staff[shift_staff['姓名'] == chosen_a]) > 0 else ""
                                 valid_mz = [z for z in valid_mz if not (z == "S2" and str(gender_a).upper() == "M")]
@@ -478,19 +482,18 @@ with main_col:
                                     assignments[chosen_a] = chosen_z
                                     unassigned_staff.remove(chosen_a)
                                     available_zones.remove(chosen_z)
-                                    continue # 成功補上 1 位 A 組，放行！
+                                    continue 
 
-                            # 若無 A 組，啟動降級備援：強迫派 2 位 B 組進駐！
                             while b_count < 2:
                                 avail_B = [n for n in unassigned_staff if get_team_of(n, shift_staff) == 'B']
-                                if not avail_B: break # B 組不夠用了
+                                if not avail_B: break 
                                 
                                 chosen_b = avail_B[0]
                                 valid_mz = [z for z in z_list if z in available_zones]
                                 gender_b = shift_staff[shift_staff['姓名'] == chosen_b]['性別'].values[0] if len(shift_staff[shift_staff['姓名'] == chosen_b]) > 0 else ""
                                 valid_mz = [z for z in valid_mz if not (z == "S2" and str(gender_b).upper() == "M")]
                                 
-                                if not valid_mz: break # 大區客滿了
+                                if not valid_mz: break 
                                     
                                 valid_mz.sort(key=lambda z: monthly_counts[chosen_b].get(z, 0))
                                 chosen_z = valid_mz[0]
@@ -510,6 +513,9 @@ with main_col:
 
                         random.shuffle(unassigned_staff)
                         unassigned_staff.sort(key=lambda x: get_team_priority(x, shift_staff))
+                        
+                        # 💡 【新增】找出當班還有誰「有資格上 T，但這個月 0 次」
+                        t_novices_today = [n for n in unassigned_staff if 'T' in team_allowed_zones.get(get_team_of(n, shift_staff), []) and monthly_counts[n].get('T', 0) == 0]
 
                         for name in list(unassigned_staff):
                             gender = shift_staff[shift_staff['姓名'] == name]['性別'].values[0] if len(shift_staff[shift_staff['姓名'] == name]) > 0 else ""
@@ -525,7 +531,8 @@ with main_col:
                                 if not valid_cands:
                                     valid_cands = available_zones.copy()
 
-                            z_scores = [(z, get_zone_score(z, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled)) for z in valid_cands]
+                            # 將 t_novices_today 傳遞給評分系統
+                            z_scores = [(z, get_zone_score(z, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled, t_novices_today)) for z in valid_cands]
                             z_scores.sort(key=lambda x: x[1])
                             
                             chosen_zone = z_scores[0][0]
