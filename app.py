@@ -179,7 +179,7 @@ train_t = st.sidebar.multiselect("檢傷(T) 訓練名單", options=all_staff if 
 
 leader_options = ["請點選"] + all_staff if data_ready else ["請點選"]
 
-st.sidebar.subheader("👑 各班組長順位")
+st.sidebar.subheader("各班組長順位")
 d_l_1 = st.sidebar.selectbox("D班 第一順位", leader_options)
 d_l_2 = st.sidebar.selectbox("D班 第二順位", leader_options)
 d_l_3 = st.sidebar.selectbox("D班 第三順位", leader_options)
@@ -194,7 +194,7 @@ master_zones = ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R3", "R2", "P", "
 
 st.sidebar.markdown("---")
 # 💡 改為 G 組
-st.sidebar.subheader("🌱 G組 新人臨床教師與區域指定")
+st.sidebar.subheader("🌱 新人臨床教師與區域指定")
 
 g_team_members = []
 g_team_config = {}
@@ -203,7 +203,7 @@ if data_ready:
     g_team_members = df_shift[df_shift['組別'].astype(str).str.strip().str.upper() == 'G']['姓名'].unique().tolist()
     
     if not g_team_members:
-        st.sidebar.info("✅ 本月班表中未偵測到「G組」未獨立新人。")
+        st.sidebar.info("✅本月班表中未偵測到「未獨立新人」。")
     else:
         st.sidebar.success(f"系統自動抓取到 {len(g_team_members)} 位 G組 新人！")
         for i, nh_name in enumerate(g_team_members):
@@ -249,7 +249,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動，正在計算常規防撞庫存 與 主力護盤預派..."):
+        with st.spinner("🚀 排班辛苦了，祝你成功!!"):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
