@@ -173,7 +173,7 @@ train_t = st.sidebar.multiselect("檢傷(T) 訓練名單", options=all_staff if 
 
 leader_options = ["請點選"] + all_staff if data_ready else ["請點選"]
 
-st.sidebar.subheader("👑 各班組長順位")
+st.sidebar.subheader("各班組長順位")
 d_l_1 = st.sidebar.selectbox("D班 第一順位", leader_options)
 d_l_2 = st.sidebar.selectbox("D班 第二順位", leader_options)
 d_l_3 = st.sidebar.selectbox("D班 第三順位", leader_options)
@@ -200,7 +200,7 @@ if data_ready:
     else:
         st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 H組 新人！")
         for i, nh_name in enumerate(h_team_members):
-            with st.sidebar.expander(f"👤 {nh_name} 專屬設定", expanded=True):
+            with st.sidebar.expander(f"👤 {nh_name} 設定", expanded=True):
                 p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
                 p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
                 p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
@@ -232,7 +232,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動，正在執行 9 大排班護盤步驟..."):
+        with st.spinner("🚀 引擎啟動...喝口水吧!!"):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
@@ -303,7 +303,7 @@ with main_col:
                             if "L" not in assignments.values():
                                 missing_l_records.append({
                                     '日期': f"2026/06/{str(date_col).zfill(2)}",
-                                    '對象班別': f"👑 {shift_type} 班 組長",
+                                    '對象班別': f" {shift_type} 班 組長",
                                     '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                                 })
 
@@ -575,12 +575,12 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！已更新統計結果呈現順序與欄位名稱！")
+                st.success("🎉 排班完成！祝你順利！")
                 
                 def preview_highlight(val):
                     try:
                         v = pd.to_numeric(val)
-                        if v == 0: return 'background-color: #FFFF00; color: #000000'
+                        if v == 0: return 'background-color: #77DDFF; color: #000000'
                         elif v > 5: return 'background-color: #FFDAB9; color: #000000'
                     except: pass
                     return ''
