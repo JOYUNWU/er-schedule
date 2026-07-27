@@ -78,12 +78,7 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     if zone in severe_zones and past_1_zone in severe_zones:
         score += 10000000 
 
-    # T與P 不超過3天防線 (盡量小於4天)
-    if zone in ['T', 'T2', 'P', 'P2']:
-        if past_1_zone not in ['T', 'T2', 'P', 'P2']: 
-            days_to_off = work_blocks[name][day_idx]
-            if days_to_off > 3: # 距離OFF超過3天，禁止開啟T/P副本
-                score += 5000000 
+    # 💡 V25 已刪除 T與P 不超過3天 的限制！全面解放 AI 彈性，僅依靠 OFF 截斷。
 
     # 9.3 GB, GC 盡可能平均分配給組別 A, B, C
     if zone in ['GB', 'GC']:
@@ -319,11 +314,10 @@ with main_col:
                         # ==========================================
                         # 第二階段：影子與特權進場
                         # ==========================================
-                        # 4️⃣ H 組新人影子帶飛 (反轉邏輯：先定H，再拉老師)
+                        # 4️⃣ H 組新人影子帶飛
                         for nh_name in h_team_members:
                             if nh_name in unassigned_staff or nh_name in assignments:
                                 
-                                # A. 決定 H組 去哪區
                                 chosen_nh_zone = assignments.get(nh_name, None)
                                 allowed_zones = h_team_config.get(nh_name, {}).get("allowed_zones", master_zones)
                                 
@@ -345,7 +339,6 @@ with main_col:
                                     assignments[nh_name] = chosen_nh_zone
                                     if nh_name in unassigned_staff: unassigned_staff.remove(nh_name) 
 
-                                # B. 尋找老師來配對
                                 active_preceptor = None
                                 for p in h_team_config.get(nh_name, {}).get("preceptors", []):
                                     if p in unassigned_staff:
@@ -362,7 +355,6 @@ with main_col:
                                     subs_any = [s for s in unassigned_staff if s != nh_name and get_team_of(s, shift_staff) != 'H']
                                     if subs_any: active_preceptor = subs_any[0]
 
-                                # C. 指派老師
                                 if active_preceptor:
                                     assignments[active_preceptor] = chosen_nh_zone
                                     unassigned_staff.remove(active_preceptor)
@@ -423,7 +415,6 @@ with main_col:
                                     chosen_z = valid_z[0]
                                     available_zones.remove(chosen_z)
                                 else:
-                                    # ⚠️ 強制保護：就算坑位沒了，也硬生生塞進去，保證 OFF 前不斷鏈
                                     chosen_z = z_list[0]
                                     if available_zones: available_zones.pop() 
                                 assignments[name] = chosen_z
@@ -531,7 +522,6 @@ with main_col:
                 majority_shift_dict = {name: max(set([x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']]), key=[x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']].count) if [x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']] else "" for name in all_staff}
                 df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
                 
-                # 🌟 V24: 修復 preview_df 遺失的問題
                 summary_cols = ['2區計', 'MO計', 'R1+R3計', 'GB+GC計']
                 zone_count_order = ["L", "L2", "T", "T2", "GB", "GC", "GD", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "職代"]
                 
@@ -574,7 +564,7 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！已更新統計結果呈現順序與欄位名稱！")
+                st.success("🎉 排班完成！已成功為 AI 計分大腦解開束縛，大幅增加排班彈性與順暢度！")
                 
                 def preview_highlight(val):
                     try:
@@ -584,9 +574,7 @@ with main_col:
                     except: pass
                     return ''
                 
-                # 💡 這一行終於回來了！這就是讓畫面顯示的關鍵
                 preview_df = df_result.head(10).copy()
-
                 target_cols_preview = [c for c in target_cols if c in preview_df.columns]
                 st.dataframe(preview_df.style.map(preview_highlight, subset=target_cols_preview))
 
