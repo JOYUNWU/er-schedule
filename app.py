@@ -564,7 +564,7 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！已成功為 AI 計分大腦解開束縛，大幅增加排班彈性與順暢度！")
+                st.success("🎉 排班完成！祝你順利！")
                 
                 def preview_highlight(val):
                     try:
