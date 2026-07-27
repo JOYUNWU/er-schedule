@@ -173,7 +173,7 @@ train_t = st.sidebar.multiselect("檢傷(T) 訓練名單", options=all_staff if 
 
 leader_options = ["請點選"] + all_staff if data_ready else ["請點選"]
 
-st.sidebar.subheader("各班組長順位")
+st.sidebar.subheader("👑 各班組長順位")
 d_l_1 = st.sidebar.selectbox("D班 第一順位", leader_options)
 d_l_2 = st.sidebar.selectbox("D班 第二順位", leader_options)
 d_l_3 = st.sidebar.selectbox("D班 第三順位", leader_options)
@@ -200,7 +200,7 @@ if data_ready:
     else:
         st.sidebar.success(f"系統自動抓取到 {len(h_team_members)} 位 H組 新人！")
         for i, nh_name in enumerate(h_team_members):
-            with st.sidebar.expander(f"👤 {nh_name} 設定", expanded=True):
+            with st.sidebar.expander(f"👤 {nh_name} 專屬設定", expanded=True):
                 p1 = st.selectbox(f"第一順位教師", ["無"] + all_staff, key=f"p1_{i}")
                 p2 = st.selectbox(f"第二順位教師", ["無"] + all_staff, key=f"p2_{i}")
                 p3 = st.selectbox(f"第三順位教師", ["無"] + all_staff, key=f"p3_{i}")
@@ -232,7 +232,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動...喝口水吧!!"):
+        with st.spinner("🚀 引擎啟動，正在執行 9 大排班護盤步驟..."):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
@@ -303,7 +303,7 @@ with main_col:
                             if "L" not in assignments.values():
                                 missing_l_records.append({
                                     '日期': f"2026/06/{str(date_col).zfill(2)}",
-                                    '對象班別': f" {shift_type} 班 組長",
+                                    '對象班別': f"👑 {shift_type} 班 組長",
                                     '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                                 })
 
@@ -531,7 +531,7 @@ with main_col:
                 majority_shift_dict = {name: max(set([x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']]), key=[x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']].count) if [x for x in df_shift[df_shift['姓名'] == name][date_columns].values.flatten() if x in ['D', 'E', 'N']] else "" for name in all_staff}
                 df_result.insert(name_col_index, '當月班別', df_result['姓名'].map(majority_shift_dict))
                 
-                # 🌟 V23: 更新欄位名稱與順序
+                # 🌟 V24: 修復 preview_df 遺失的問題
                 summary_cols = ['2區計', 'MO計', 'R1+R3計', 'GB+GC計']
                 zone_count_order = ["L", "L2", "T", "T2", "GB", "GC", "GD", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "S1", "S2", "S", "P", "P2", "MO", "MO1", "MO2", "職代"]
                 
@@ -551,7 +551,6 @@ with main_col:
                 col_start = get_column_letter(first_date_col_idx)
                 col_end = get_column_letter(last_date_col_idx)
 
-                # 將 summary_cols 放在前面
                 target_cols = summary_cols + zone_count_order
                 for col in target_cols:
                     if col not in df_excel.columns:
@@ -575,16 +574,19 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！祝你順利！")
+                st.success("🎉 排班完成！已更新統計結果呈現順序與欄位名稱！")
                 
                 def preview_highlight(val):
                     try:
                         v = pd.to_numeric(val)
-                        if v == 0: return 'background-color: #77DDFF; color: #000000'
+                        if v == 0: return 'background-color: #FFFF00; color: #000000'
                         elif v > 5: return 'background-color: #FFDAB9; color: #000000'
                     except: pass
                     return ''
                 
+                # 💡 這一行終於回來了！這就是讓畫面顯示的關鍵
+                preview_df = df_result.head(10).copy()
+
                 target_cols_preview = [c for c in target_cols if c in preview_df.columns]
                 st.dataframe(preview_df.style.map(preview_highlight, subset=target_cols_preview))
 
