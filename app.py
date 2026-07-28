@@ -47,11 +47,10 @@ def is_severe(zone):
     return zone in ['R', 'S', 'C2']
 
 # ==========================================
-# 🌟 AI 權重計分系統 (第9步驟核心)
+# 🌟 AI 權重計分系統
 # ==================================================
 def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_counts, work_blocks, current_day_macro_teams, ab_gb_gc_fulfilled):
     
-    # 9.4 均勻分配：月累積次數越少，分數越低 (優先級越高)
     score = get_zone_count(zone, monthly_counts, name) * 10000 
 
     past_zones = []
@@ -64,42 +63,33 @@ def get_zone_score(zone, name, team, day_idx, df_result, date_columns, monthly_c
     past_1_zone = past_zones[0] if len(past_zones) > 0 else ""
     past_macros = [get_macro(pz) for pz in past_zones]
 
-    # A組特權防撞
     if team == 'A' and zone in ['R2', 'A2', 'S1']:
         score += 5000000 
 
-    # 9.1 嚴格避開「同大區、同組別」防撞
     macro_z = get_macro(zone)
     if team in current_day_macro_teams.get(macro_z, set()):
         score += 20000 
 
-    # 9.2 嚴格避開 R, B1, C2, S 任何兩個連續安排
     severe_zones = ['R', 'B1', 'C2', 'S']
     if zone in severe_zones and past_1_zone in severe_zones:
         score += 10000000 
 
-    # 💡 V25 已刪除 T與P 不超過3天 的限制！全面解放 AI 彈性，僅依靠 OFF 截斷。
-
-    # 9.3 GB, GC 盡可能平均分配給組別 A, B, C
     if zone in ['GB', 'GC']:
         if team not in ['A', 'B', 'C']:
-            score += 5000000 # G, F, E, D 嚴禁去 GB, GC
+            score += 5000000 
         else:
             c = get_zone_count(zone, monthly_counts, name)
-            score += (c * 20000) # 給 A, B, C 更強的次數平衡引力
+            score += (c * 20000) 
 
-    # A2, B2, C2 天花板
     if zone in ['A2', 'B2', 'C2']:
         c = get_zone_count(zone, monthly_counts, name)
         if c >= 5: score += 5000000
 
-    # MO系 遞增阻力
     if zone in ['MO', 'MO1', 'MO2']:
         c = get_zone_count(zone, monthly_counts, name)
         score += (c * 25000) 
         if c >= 5: score += 2000000 
 
-    # 區域優先引力
     if zone == 'B1':
         if team == 'B': score -= 400
         elif team == 'A': score -= 300
@@ -227,7 +217,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動，先喝口水吧!!..."):
+        with st.spinner("🚀 引擎啟動，正在執行 9 大排班護盤步驟..."):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
@@ -245,11 +235,12 @@ with main_col:
                             count += 1
                         work_blocks[name][day_idx] = count
 
+                # 💡 V27: 完美校準合法區域 (D組拔除 B1, C2)
                 team_allowed_zones = {
                     'A': ["L", "T", "T2", "B1", "C1", "B2", "C2", "R", "R1", "R3", "MO", "MO1", "MO2", "S2", "S", "GC", "GB", "GD"],
-                    'B': ["T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GC", "GB", "GD"],
+                    'B': ["T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
                     'C': ["A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
-                    'D': ["A1", "B1", "C1", "A2", "B2", "C2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
+                    'D': ["A1", "C1", "A2", "B2", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "GC", "GB", "GD"],
                     'E': ["A1", "C1", "A2", "B2", "R1", "R2", "P", "MO", "MO1", "MO2", "S1", "GB", "GC"],
                     'F': ["A1", "A2", "R2", "MO", "MO1", "P", "S1"],
                     'G': ["A1", "R2", "MO", "MO1", "S1"]
@@ -274,10 +265,6 @@ with main_col:
                         assignments = {}
                         pre_assigned_zones = []
                         
-                        # ==========================================
-                        # 第一階段：絕對優先與前置作業
-                        # ==========================================
-                        # 1️⃣ 拔除手動預排
                         for _, row in shift_staff.iterrows():
                             name, preset = row['姓名'], str(row['預設區域']).strip().upper()
                             if preset not in ['X', 'NAN', 'NONE', ''] and name in unassigned_staff:
@@ -287,7 +274,6 @@ with main_col:
                                     if get_team_of(name, shift_staff) != 'H': 
                                         pre_assigned_zones.append(preset)
                         
-                        # 2️⃣ 拔除當班組長
                         if "L" not in assignments.values():
                             l_chain = [d_l_1, d_l_2, d_l_3] if shift_type == 'D' else [e_l_1, e_l_2, e_l_3] if shift_type == 'E' else [n_l_1, n_l_2, n_l_3]
                             for l_cand in l_chain:
@@ -302,7 +288,6 @@ with main_col:
                                     '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                                 })
 
-                        # 3️⃣ 精算當班常規坑位
                         staff_for_quota = [n for n in unassigned_staff if get_team_of(n, shift_staff) != 'H']
                         total_needed = len(staff_for_quota) + len(pre_assigned_zones)
                         base_zones = (master_zones * 2)[:total_needed] 
@@ -311,13 +296,8 @@ with main_col:
                             if pz in available_zones: available_zones.remove(pz)
                             elif available_zones: available_zones.pop()
 
-                        # ==========================================
-                        # 第二階段：影子與特權進場
-                        # ==========================================
-                        # 4️⃣ H 組新人影子帶飛
                         for nh_name in h_team_members:
                             if nh_name in unassigned_staff or nh_name in assignments:
-                                
                                 chosen_nh_zone = assignments.get(nh_name, None)
                                 allowed_zones = h_team_config.get(nh_name, {}).get("allowed_zones", master_zones)
                                 
@@ -368,7 +348,6 @@ with main_col:
                                     })
                                     assignments[nh_name] = "⚠️需指派老師"
 
-                        # 5️⃣ 特定人員專屬綁定
                         for special_staff in ["N連啟倫", "N2陳信介"]:
                             if special_staff in unassigned_staff:
                                 valid_mo_zones = [z for z in ['MO', 'MO1', 'MO2'] if z in available_zones]
@@ -384,10 +363,6 @@ with main_col:
                                     unassigned_staff.remove(special_staff)
                                     if available_zones: available_zones.pop()
 
-                        # ==========================================
-                        # 第三階段：連續性與強制連上
-                        # ==========================================
-                        # 6️⃣ 區塊連續性鎖定 (T/P/G組 絕對連續不中斷)
                         continuous_reqs = []
                         for name in list(unassigned_staff):
                             if day_idx > 0:
@@ -396,13 +371,11 @@ with main_col:
                                     prev_zone = str(df_result.loc[df_result['姓名'] == name, date_columns[day_idx - 1]].values[0]).strip()
                                     if prev_zone not in ['OFF', 'L', 'X', 'NAN', '']:
                                         is_train = (name in train_s2 and prev_zone == "S2") or (name in train_b1_r and prev_zone in ["B1", "R", "S", "C2"])
-                                        is_TP = prev_zone in ["T", "T2", "P", "P2"]
+                                        is_TP = prev_zone in ["T", "P"] 
                                         is_team_G = (get_team_of(name, shift_staff) == 'G')
                                         
                                         if is_train or is_TP or is_team_G:
                                             req_zones = [prev_zone]
-                                            if is_TP:
-                                                req_zones = ['T', 'T2'] if prev_zone in ['T', 'T2'] else ['P', 'P2']
                                             continuous_reqs.append({'name': name, 'zones': req_zones, 'is_train': is_train})
                         
                         continuous_reqs.sort(key=lambda x: not x['is_train']) 
@@ -420,7 +393,6 @@ with main_col:
                                 assignments[name] = chosen_z
                                 unassigned_staff.remove(name)
 
-                        # 7️⃣ 白名單剛放假回來的優先進場
                         for t_list, t_zone in [(train_s2, "S2"), (train_t, "T")]:
                             cands = [n for n in list(unassigned_staff) if n in t_list]
                             if cands and t_zone in available_zones:
@@ -429,10 +401,6 @@ with main_col:
                                 unassigned_staff.remove(cands[0])
                                 available_zones.remove(t_zone)
 
-                        # ==========================================
-                        # 第四階段：戰略護盤與一般分配
-                        # ==========================================
-                        # 8️⃣ 內、外、急大區主力護盤 (1位A 或 1位B)
                         macro_target_zones = {
                             'MED': ['A2', 'B2', 'C2'],
                             'SURG': ['S', 'S1', 'S2'],
@@ -478,7 +446,6 @@ with main_col:
                                         unassigned_staff.remove(best_b)
                                         available_zones.remove(best_z_b)
 
-                        # 9️⃣ 剩下的常規人員「貪婪分配」
                         current_day_macro_teams = {}
                         for assigned_name, assigned_z in assignments.items():
                             t_val = get_team_of(assigned_name, shift_staff)
@@ -564,7 +531,7 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！祝你順利！")
+                st.success("🎉 排班完成！已精準更新合法區域清單，杜絕強制跨區現象！")
                 
                 def preview_highlight(val):
                     try:
