@@ -227,7 +227,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動，正在執行 9 大排班護盤步驟..."):
+        with st.spinner("🚀 引擎啟動，先喝口水吧!!..."):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
