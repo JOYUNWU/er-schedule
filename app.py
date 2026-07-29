@@ -217,7 +217,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動，正在執行 9 大排班護盤步驟..."):
+        with st.spinner("🚀 引擎啟動! 起來動動、喝口水吧！！..."):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
@@ -560,7 +560,7 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！已完美載入人數與區域絕對對照表！")
+                st.success("🎉 排班完成！祝你排班順利！")
                 
                 def preview_highlight(val):
                     try:
