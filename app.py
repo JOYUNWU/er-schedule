@@ -217,7 +217,7 @@ with help_col:
 
 with main_col:
     if st.button("🚀 開始自動排班運算", disabled=not data_ready, use_container_width=True):
-        with st.spinner("🚀 引擎啟動，先喝口水吧!!..."):
+        with st.spinner("🚀 引擎啟動，正在執行 9 大排班護盤步驟..."):
             try:
                 df_result = df_template.copy()
                 monthly_counts = {name: {} for name in all_staff}
@@ -235,7 +235,6 @@ with main_col:
                             count += 1
                         work_blocks[name][day_idx] = count
 
-                # 💡 V27: 完美校準合法區域 (D組拔除 B1, C2)
                 team_allowed_zones = {
                     'A': ["L", "T", "T2", "B1", "C1", "B2", "C2", "R", "R1", "R3", "MO", "MO1", "MO2", "S2", "S", "GC", "GB", "GD"],
                     'B': ["T", "T2", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "GC", "GB", "GD"],
@@ -265,6 +264,9 @@ with main_col:
                         assignments = {}
                         pre_assigned_zones = []
                         
+                        # ==========================================
+                        # 第一階段：絕對優先與前置作業
+                        # ==========================================
                         for _, row in shift_staff.iterrows():
                             name, preset = row['姓名'], str(row['預設區域']).strip().upper()
                             if preset not in ['X', 'NAN', 'NONE', ''] and name in unassigned_staff:
@@ -288,14 +290,35 @@ with main_col:
                                     '異常提示': "⚠️ 該班別設定的三個順位組長今天全部休假，缺少L，請手動指派"
                                 })
 
+                        # 🌟 3️⃣ 精算當班常規坑位 (導入絕對區域人數對照表)
                         staff_for_quota = [n for n in unassigned_staff if get_team_of(n, shift_staff) != 'H']
                         total_needed = len(staff_for_quota) + len(pre_assigned_zones)
-                        base_zones = (master_zones * 2)[:total_needed] 
+                        
+                        # 建立 17~22 人對應的「絕對區域」字典 (扣掉L，對應的需要名額是 16~21)
+                        zone_quota_map = {
+                            16: ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S"], 
+                            17: ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S", "S2"], 
+                            18: ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S"], 
+                            19: ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2"], 
+                            20: ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GB"], 
+                            21: ["T", "A1", "B1", "C1", "A2", "B2", "C2", "R", "R1", "R2", "R3", "P", "MO", "MO1", "MO2", "S1", "S2", "S", "T2", "GB", "GC"]
+                        }
+
+                        if total_needed in zone_quota_map:
+                            base_zones = zone_quota_map[total_needed].copy()
+                        else:
+                            # 若人數為極端值(小於17或大於22)，啟動防呆依序擷取
+                            base_zones = (master_zones * 2)[:total_needed] 
+                            
                         available_zones = base_zones.copy()
+                        
                         for pz in pre_assigned_zones:
                             if pz in available_zones: available_zones.remove(pz)
                             elif available_zones: available_zones.pop()
 
+                        # ==========================================
+                        # 第二階段：影子與特權進場
+                        # ==========================================
                         for nh_name in h_team_members:
                             if nh_name in unassigned_staff or nh_name in assignments:
                                 chosen_nh_zone = assignments.get(nh_name, None)
@@ -363,6 +386,9 @@ with main_col:
                                     unassigned_staff.remove(special_staff)
                                     if available_zones: available_zones.pop()
 
+                        # ==========================================
+                        # 第三階段：連續性與強制連上
+                        # ==========================================
                         continuous_reqs = []
                         for name in list(unassigned_staff):
                             if day_idx > 0:
@@ -401,6 +427,9 @@ with main_col:
                                 unassigned_staff.remove(cands[0])
                                 available_zones.remove(t_zone)
 
+                        # ==========================================
+                        # 第四階段：戰略護盤與一般分配
+                        # ==========================================
                         macro_target_zones = {
                             'MED': ['A2', 'B2', 'C2'],
                             'SURG': ['S', 'S1', 'S2'],
@@ -531,7 +560,7 @@ with main_col:
                 else:
                     df_missing_l = pd.DataFrame(missing_l_records)
 
-                st.success("🎉 排班完成！祝你排班順利！")
+                st.success("🎉 排班完成！已完美載入人數與區域絕對對照表！")
                 
                 def preview_highlight(val):
                     try:
